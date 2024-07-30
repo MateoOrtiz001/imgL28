@@ -1,6 +1,6 @@
 import numpy as np
 from skimage import color, util
-from algs.quantize_lloyd_max import quantize_lloyd_max
+from algs.quantizationMaxLloyd import quantize_lloyd_max
 
 def quantize_YCbCr(image):
 
