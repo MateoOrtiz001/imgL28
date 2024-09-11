@@ -7,12 +7,12 @@ def repujado(image,levelR=2,levelG=2,levelB=2,canalR = True,canalG = True, canal
     G = imagen_np[:, :, 1]
     B = imagen_np[:, :, 2]
     if canalR:
-      convR = convolucionar_canal(R,levelR)
+      R = convolucionar_canal(R,levelR)
     if canalG:
-      convG = convolucionar_canal(G,levelG)
+      G = convolucionar_canal(G,levelG)
     if canalB:
-      convB = convolucionar_canal(B,levelB)
-    output_image = np.dstack((convR, convG, convB))
+      B = convolucionar_canal(B,levelB)
+    output_image = np.dstack((R, G, B))
     return output_image
 
 def convolucionar_canal(aux,nivel):
