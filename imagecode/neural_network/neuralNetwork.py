@@ -6,6 +6,7 @@ from tensorflow.keras.optimizers import Adamax
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 from skimage.color import rgb2lab, lab2rgb, rgb2gray, gray2rgb
 from math import ceil
+from modLayers import *
 import keras
 import numpy as np
 import os
@@ -44,10 +45,12 @@ class NeuralNetwork(object):
 
 
         network = Conv2D(32, (3, 3), activation='relu', padding='same')(network)
+        network = residualBlock(network, 32)
         network = MaxPooling2D((2, 2))(network)
         network = BatchNormalization()(network)
 
         network = Conv2D(64, (3, 3), activation='relu', padding='same')(network)
+        network = residualBlock(network, 64)
         network = MaxPooling2D((2, 2))(network)
         network = BatchNormalization()(network)
 
@@ -58,17 +61,19 @@ class NeuralNetwork(object):
         #decoder
 
         network = Conv2D(256, (3, 3), activation='relu', padding='same')(network)
-        network = Conv2D(256, (3, 3), activation='tanh', padding='same')(network)
+        network = Conv2D(256, (3, 3), activation='relu', padding='same')(network)
         network = BatchNormalization()(network)
         network = Dropout(0.3)(network)
         network = UpSampling2D((2, 2))(network)
 
 
         network = Conv2D(128, (3, 3), activation='relu', padding='same')(network)
+        network = spatialAttention(network)
         network = UpSampling2D((2, 2))(network)
         network = BatchNormalization()(network)
 
         network = Conv2D(64, (3, 3), activation='relu', padding='same')(network)
+        network = spatialAttention(network)
         network = UpSampling2D((2, 2))(network)
         network = BatchNormalization()(network)
 
