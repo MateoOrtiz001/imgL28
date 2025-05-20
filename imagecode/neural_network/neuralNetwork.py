@@ -1,4 +1,4 @@
-from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, Reshape, concatenate, MaxPooling2D, Dropout, BatchNormalization
+from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, Reshape, concatenate, MaxPooling2D, Dropout, BatchNormalization, Conv2DTranspose
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.preprocessing.image import  ImageDataGenerator
 from tensorflow.keras.utils import img_to_array, load_img
@@ -13,7 +13,7 @@ import os
 
 
 class NeuralNetwork(object):
-    def __init__(self, training_path="./dataset", epochs=50, batch_size=1, path_to_model=None, image_size=128):
+    def __init__(self, training_path="./dataset", epochs=50, batch_size=16, path_to_model=None, image_size=128):
         self.training_path = training_path
         self.image_size = image_size
         self.epochs = epochs
@@ -43,7 +43,6 @@ class NeuralNetwork(object):
         network = MaxPooling2D((2, 2))(network)
         network = BatchNormalization()(network)
 
-
         network = Conv2D(32, (3, 3), activation='relu', padding='same')(network)
         network = residualBlock(network, 32)
         network = MaxPooling2D((2, 2))(network)
@@ -60,31 +59,27 @@ class NeuralNetwork(object):
 
         #decoder
 
-        network = Conv2D(256, (3, 3), activation='relu', padding='same')(network)
-        network = Conv2D(256, (3, 3), activation='relu', padding='same')(network)
+        network = Conv2D(128, (3, 3), activation='relu', padding='same')(network)
+        network = Conv2D(128, (3, 3), activation='relu', padding='same')(network)
         network = BatchNormalization()(network)
         network = Dropout(0.3)(network)
         network = UpSampling2D((2, 2))(network)
-
-
-        network = Conv2D(128, (3, 3), activation='relu', padding='same')(network)
-        network = spatialAttention(network)
-        network = UpSampling2D((2, 2))(network)
-        network = BatchNormalization()(network)
-
+        
         network = Conv2D(64, (3, 3), activation='relu', padding='same')(network)
         network = spatialAttention(network)
         network = UpSampling2D((2, 2))(network)
         network = BatchNormalization()(network)
 
         network = Conv2D(32, (3, 3), activation='relu', padding='same')(network)
+        network = spatialAttention(network)
         network = UpSampling2D((2, 2))(network)
         network = BatchNormalization()(network)
 
         network = Conv2D(16, (3, 3), activation='relu', padding='same')(network)
+        network = Conv2DTranspose(8, (3, 3), strides=(2,2), padding='same', activation='relu')(network)
         network = BatchNormalization()(network)
 
-        network = Conv2D(4, (3, 3), activation='relu', padding='same')(network)
+        network = Conv2D(8, (3, 3), activation='relu', padding='same')(network)
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same')(network)
 
         return Model(inputs=network_input, outputs=network_output)
@@ -123,7 +118,7 @@ class NeuralNetwork(object):
         early_stop = EarlyStopping(monitor='val_loss', patience=patience)  
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
         self.model.compile(optimizer=opt, loss='mse', metrics=['mae', 'acc'])
-        self.model.fit_generator(
+        self.model.fit(
             self.image_gen(subset='train'),  # Generador de entrenamiento
             steps_per_epoch=ceil(self.training_set_size * 0.8 / self.batch_size),  # 80% train
             validation_data=self.image_gen(subset='validation'),  # Generador de validación
