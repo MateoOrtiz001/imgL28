@@ -49,7 +49,7 @@ class NeuralNetwork(object):
         e2 = MaxPooling2D((2, 2))(e2)
         e2 = BatchNormalization()(e2)
 
-        e3 = Conv2D(64, (3, 3), activation='relu', padding='same')(e3)
+        e3 = Conv2D(64, (3, 3), activation='relu', padding='same')(e2)
         e3 = residualBlock(e3, 64)
         e3 = MaxPooling2D((2, 2))(e3)
         e3 = BatchNormalization()(e3)
