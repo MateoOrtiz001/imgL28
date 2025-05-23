@@ -10,6 +10,7 @@ from modLayers import *
 import keras
 import numpy as np
 import os
+import tensorflow as tf
 
 
 class NeuralNetwork(object):
@@ -38,49 +39,52 @@ class NeuralNetwork(object):
 
         #encoder
 
-        network = Conv2D(16, (3, 3), activation='relu', padding='same')(network_input)
-        network = Conv2D(16, (3, 3), activation='relu', padding='same')(network)
-        network = MaxPooling2D((2, 2))(network)
-        network = BatchNormalization()(network)
+        e1 = Conv2D(16, (3, 3), activation='relu', padding='same')(network_input)
+        e1 = Conv2D(16, (3, 3), activation='relu', padding='same')(e1)
+        e1 = MaxPooling2D((2, 2))(e1)
+        e1 = BatchNormalization()(e1)
 
-        network = Conv2D(32, (3, 3), activation='relu', padding='same')(network)
-        network = residualBlock(network, 32)
-        network = MaxPooling2D((2, 2))(network)
-        network = BatchNormalization()(network)
+        e2 = Conv2D(32, (3, 3), activation='relu', padding='same')(e1)
+        e2 = residualBlock(e2, 32)
+        e2 = MaxPooling2D((2, 2))(e2)
+        e2 = BatchNormalization()(e2)
 
-        network = Conv2D(64, (3, 3), activation='relu', padding='same')(network)
-        network = residualBlock(network, 64)
-        network = MaxPooling2D((2, 2))(network)
-        network = BatchNormalization()(network)
+        e3 = Conv2D(64, (3, 3), activation='relu', padding='same')(e3)
+        e3 = residualBlock(e3, 64)
+        e3 = MaxPooling2D((2, 2))(e3)
+        e3 = BatchNormalization()(e3)
 
-        network = Conv2D(128, (3, 3), activation='relu', padding='same')(network)
-        network = MaxPooling2D((2, 2))(network)
-        network = BatchNormalization()(network)
+        e4 = Conv2D(128, (3, 3), activation='relu', padding='same')(e4)
+        e4 = MaxPooling2D((2, 2))(e4)
+        e4 = BatchNormalization()(e4)
 
-        #decoder
-
-        network = Conv2D(128, (3, 3), activation='relu', padding='same')(network)
-        network = Conv2D(128, (3, 3), activation='relu', padding='same')(network)
-        network = BatchNormalization()(network)
-        network = Dropout(0.3)(network)
-        network = UpSampling2D((2, 2))(network)
+        b = Conv2D(128, (3, 3), activation='relu', padding='same')(e4)
+        b = Conv2D(128, (3, 3), activation='relu', padding='same')(b)
+        b = BatchNormalization()(b)
+        b = Dropout(0.3)(b)
+        b = UpSampling2D((2, 2))(b)
         
-        network = Conv2D(64, (3, 3), activation='relu', padding='same')(network)
-        network = spatialAttention(network)
-        network = UpSampling2D((2, 2))(network)
-        network = BatchNormalization()(network)
+        # decoder
+        
+        d4 = concatenate([b,e4])
+        d4 = Conv2D(64, (3, 3), activation='relu', padding='same')(d4)
+        d4 = spatialAttention(d4)
+        d4 = UpSampling2D((2, 2))(d4)
+        
+        d3 = BatchNormalization()(d4)
+        d3 = concatenate([d3,e3])
+        d3 = Conv2D(32, (3, 3), activation='relu', padding='same')(d3)
+        d3 = spatialAttention(d3)
+        d3 = UpSampling2D((2, 2))(d3)
+        
+        d2 = BatchNormalization()(d3)
+        d2 = concatenate([d2,e2])
+        d2 = Conv2D(16, (3, 3), activation='relu', padding='same')(d2)
+        d2 = Conv2DTranspose(8, (3, 3), strides=(2,2), padding='same', activation='relu')(d2)
+        d2 = BatchNormalization()(d2)
 
-        network = Conv2D(32, (3, 3), activation='relu', padding='same')(network)
-        network = spatialAttention(network)
-        network = UpSampling2D((2, 2))(network)
-        network = BatchNormalization()(network)
-
-        network = Conv2D(16, (3, 3), activation='relu', padding='same')(network)
-        network = Conv2DTranspose(8, (3, 3), strides=(2,2), padding='same', activation='relu')(network)
-        network = BatchNormalization()(network)
-
-        network = Conv2D(8, (3, 3), activation='relu', padding='same')(network)
-        network_output = Conv2D(2, (3, 3), activation='tanh', padding='same')(network)
+        d1 = Conv2DTranspose(8, (3, 3), strides=(2, 2), padding='same', activation='relu')(d2)  
+        network_output = Conv2D(2, (3, 3), activation='tanh', padding='same')(d1)
 
         return Model(inputs=network_input, outputs=network_output)
 
@@ -106,6 +110,12 @@ class NeuralNetwork(object):
             y_batch = lab_batch[:, :, :, 1:] / 128.0  
             yield (x_batch, y_batch)
 
+    def psnr(self, y_true, y_pred):
+        return tf.image.psnr(y_true, y_pred, max_val=1.0)
+
+    def ssim(self, y_true, y_pred):
+        return tf.image.ssim(y_true, y_pred, max_val=1.0)
+
     def train(self):
         # tensorboard --logdir=path/to/log-directory
         opt = Adamax(lr=0.001)
@@ -117,7 +127,7 @@ class NeuralNetwork(object):
         model_checkpoint = ModelCheckpoint(os.path.join('models', model_names), monitor='val_loss', verbose=1, save_best_only=True)
         early_stop = EarlyStopping(monitor='val_loss', patience=patience)  
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
-        self.model.compile(optimizer=opt, loss='mse', metrics=['mae', 'acc'])
+        self.model.compile(optimizer=opt, loss='mse', metrics=[self.psnr, self.ssim])
         self.model.fit(
             self.image_gen(subset='train'),  # Generador de entrenamiento
             steps_per_epoch=ceil(self.training_set_size * 0.8 / self.batch_size),  # 80% train
