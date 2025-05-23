@@ -91,23 +91,23 @@ class NeuralNetwork(object):
     def load_model_from_file(filename):
         return load_model(filename)
         
-    def image_gen(self, subset='train'):   
+    def image_gen(self, subset='training'):
         generator = self.datagen.flow_from_directory(
-            directory=self.training_path,  
+            directory=self.training_path,
             classes=None,
             target_size=(self.image_size, self.image_size),
             batch_size=self.batch_size,
-            subset=subset,
-            class_mode=None, 
+            subset=subset,  # 'training' o 'validation' para división aleatoria
+            class_mode=None,
             shuffle=True
         )
-        
+        print(f"Imágenes encontradas para {subset}: {generator.samples}")
         for batch in generator:
-            _batch = (1.0 / 255) * batch[0]
+            _batch = (1.0 / 255) * batch  # Eliminamos batch[0]
             lab_batch = rgb2lab(_batch)
-            x_batch = lab_batch[:, :, :, 0] / 100.0  
-            y_batch = lab_batch[:, :, :, 1:] / 128.0  
-            yield (x_batch, y_batch)
+            x_batch = lab_batch[:, :, :, 0] / 100.0
+            y_batch = lab_batch[:, :, :, 1:] / 128.0
+            yield (x_batch[:, :, :, None], y_batch)
 
     def psnr(self, y_true, y_pred):
         return tf.image.psnr(y_true, y_pred, max_val=1.0)
@@ -116,29 +116,38 @@ class NeuralNetwork(object):
         return tf.image.ssim(y_true, y_pred, max_val=1.0)
 
     def train(self):
-        # tensorboard --logdir=path/to/log-directory
-        opt = Adamax(lr=0.001)
+        opt = Adamax(learning_rate=0.001) 
         patience = 20
-        tb_callback = keras.callbacks.TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
-                                                  write_grads=False, write_images=False, embeddings_freq=0,
-                                                  embeddings_layer_names=None, embeddings_metadata=None)
-        model_names = 'model.{epoch:02d}-{loss:.10f}.hdf5'
-        model_checkpoint = ModelCheckpoint(os.path.join('models', model_names), monitor='val_loss', verbose=1, save_best_only=True)
-        early_stop = EarlyStopping(monitor='val_loss', patience=patience)  
+        tb_callback = keras.callbacks.TensorBoard(
+            log_dir='./logs',
+            histogram_freq=0,
+            write_graph=True,
+            write_images=False
+        )
+        model_names = 'model.{epoch:02d}-{val_loss:.10f}.keras'
+        model_checkpoint = ModelCheckpoint(
+            os.path.join('models', model_names),
+            monitor='val_loss',
+            verbose=1,
+            save_best_only=True
+        )
+        early_stop = EarlyStopping(monitor='val_loss', patience=patience)
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
+        
         self.model.compile(optimizer=opt, loss='mse', metrics=[self.psnr, self.ssim])
+        
         self.model.fit(
-            self.image_gen(subset='train'),  # Generador de entrenamiento
-            steps_per_epoch=ceil(self.training_set_size * 0.8 / self.batch_size),  # 80% train
-            validation_data=self.image_gen(subset='validation'),  # Generador de validación
-            validation_steps=ceil(self.training_set_size * 0.2 / self.batch_size),  # 20% val
+            self.image_gen(subset='training'),
+            steps_per_epoch=ceil(self.training_set_size * 0.8 / self.batch_size),
+            validation_data=self.image_gen(subset='validation'),
+            validation_steps=ceil(self.training_set_size * 0.2 / self.batch_size),
             epochs=self.epochs,
-            callbacks=[model_checkpoint, early_stop, reduce_lr]
+            callbacks=[tb_callback, model_checkpoint, early_stop, reduce_lr]
         )
 
     def save_model(self):
-        self.model.save_weights('weights_{}e_pic.h5'.format(self.epochs))
-        self.model.save('model_{}e_pic_m.h5'.format(self.epochs))
+        self.model.save_weights('weights_{}e_pic.weights.h5'.format(self.epochs))
+        self.model.save('model_{}e_pic_m.keras'.format(self.epochs))
 
     def run(self):
         self.train()
