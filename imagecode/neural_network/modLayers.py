@@ -15,3 +15,13 @@ def residualBlock(x, filters):
     x = Add()([x, shortcut])  # Conexión residual
     return x
 
+def residualBlockCB(x, filters):
+    shortcut = x
+    x = Conv2D(filters, (1,1), padding='same', activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = Conv2D(filters, (3,3), padding='same', activation='relu')(x)
+    x = BatchNormalization()(x)
+    x = Conv2D(filters, (1,1), padding='same')(x)
+    x = BatchNormalization()(x)
+    x = Add()([x,shortcut])
+    return x

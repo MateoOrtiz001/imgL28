@@ -1,5 +1,6 @@
 from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, Reshape, concatenate, MaxPooling2D, Dropout, BatchNormalization, Conv2DTranspose
 from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.regularizers import l2, OrthogonalRegularizer 
 from tensorflow.keras.preprocessing.image import  ImageDataGenerator
 from tensorflow.keras.utils import img_to_array, load_img
 from tensorflow.keras.optimizers import Adamax
@@ -39,50 +40,70 @@ class NeuralNetwork(object):
 
         #encoder
 
-        e1 = Conv2D(16, (3, 3), activation='relu', padding='same')(network_input)
-        e1 = Conv2D(16, (3, 3), activation='relu', padding='same')(e1)
+        e1 = Conv2D(16, (3, 3), activation='relu', padding='same')(network_input)   #128
+        e1 = residualBlock(e1,16)
+        e1 = Conv2D(16, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e1)
         
-        e2 = MaxPooling2D((2, 2))(e1)
+        e2 = MaxPooling2D((2, 2))(e1)                                               #64
         e2 = BatchNormalization()(e2)
         e2 = Conv2D(32, (3, 3), activation='relu', padding='same')(e2)
-        e2 = residualBlock(e2, 32)
+        e2 = residualBlockCB(e2, 32)
+        e2 = Conv2D(32, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e2)
         
-        e3 = MaxPooling2D((2, 2))(e2)
+        e3 = MaxPooling2D((2, 2))(e2)                                               #32
         e3 = BatchNormalization()(e3)
         e3 = Conv2D(64, (3, 3), activation='relu', padding='same')(e3)
-        e3 = residualBlock(e3, 64)
+        e3 = residualBlockCB(e3, 64)
+        e3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e3)
         
-        e4 = MaxPooling2D((2, 2))(e3)
+        e4 = MaxPooling2D((2, 2))(e3)                                               #16
         e4 = BatchNormalization()(e4)
         e4 = Conv2D(128, (3, 3), activation='relu', padding='same')(e4)
-        e4 = residualBlock(e4,128)
+        e4 = residualBlockCB(e4,128)
+        e4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e4)
         
-        b = MaxPooling2D((2, 2))(e4)
+        e5 = MaxPooling2D((2,2))(e4)                                                #8
+        e5 = BatchNormalization()(e5)
+        e5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e5)
+        e5 = residualBlock(e5,256)
+        
+        # cuello de botella
+        
+        b = MaxPooling2D((2, 2))(e5)                                                #4
         b = BatchNormalization()(b)
-        b = Conv2D(128, (3, 3), activation='relu', padding='same')(b)
-        b = Conv2D(128, (3, 3), activation='relu', padding='same')(b)
-        b = BatchNormalization()(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=OrthogonalRegularizer(0.01))(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=OrthogonalRegularizer(0.01))(b)
         b = Dropout(0.3)(b)
         
         # decoder
         
-        d4 = UpSampling2D((2, 2))(b)
+        d5 = Conv2DTranspose(256, (3,3), strides=(2,2), padding='same', activation='relu')(b)  #8
+        d5 = BatchNormalization()(d5)
+        d5 = concatenate([d5,e5])
+        d5 = Conv2D(256, (3,3), activation='relu', padding='same')(d5)
+        d5 = spatialAttention(d5)
+        d5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(d5)
+        
+        d4 = UpSampling2D((2, 2))(d5)                                                            #16
         d4 = BatchNormalization()(d4)
         d4 = concatenate([d4,e4])
-        d4 = Conv2D(64, (3, 3), activation='relu', padding='same')(d4)
+        d4 = Conv2D(128, (3, 3), activation='relu', padding='same')(d4)
         d4 = spatialAttention(d4)
-        
-        d3 = UpSampling2D((2, 2))(d4)
+        d4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(d4)
+
+        d3 = UpSampling2D((2, 2))(d4)                                                           #32
         d3 = BatchNormalization()(d3)
         d3 = concatenate([d3,e3])
-        d3 = Conv2D(32, (3, 3), activation='relu', padding='same')(d3)
+        d3 = Conv2D(64, (3, 3), activation='relu', padding='same')(d3)
         d3 = spatialAttention(d3)
+        d3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(d3)
         
-        d2 = Conv2DTranspose(8, (3, 3), strides=(2,2), padding='same', activation='relu')(d3)
+        d2 = Conv2DTranspose(16, (3, 3), strides=(2,2), padding='same', activation='relu')(d3)   #64
         d2 = BatchNormalization()(d2)
         d2 = concatenate([d2,e2])
+        d2 = Conv2D(16, (3,3), padding='same', activation='relu', kernel_regularizer=l2(0.01))(d2)
         d2 = spatialAttention(d2)
-        d1 = Conv2DTranspose(4, (3, 3), strides=(2, 2), padding='same', activation='relu')(d2)  
+        d1 = Conv2DTranspose(4, (3, 3), strides=(2, 2), padding='same', activation='relu', kernel_regularizer=OrthogonalRegularizer(0.01))(d2)  #128
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same')(d1)
 
         return Model(inputs=network_input, outputs=network_output)
