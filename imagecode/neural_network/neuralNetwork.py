@@ -1,6 +1,6 @@
 from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, Reshape, concatenate, MaxPooling2D, Dropout, BatchNormalization, Conv2DTranspose
 from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.regularizers import l2, OrthogonalRegularizer 
+from tensorflow.keras.regularizers import l1, l2, OrthogonalRegularizer 
 from tensorflow.keras.preprocessing.image import  ImageDataGenerator
 from tensorflow.keras.utils import img_to_array, load_img
 from tensorflow.keras.optimizers import Adamax
@@ -71,8 +71,8 @@ class NeuralNetwork(object):
         
         b = MaxPooling2D((2, 2))(e5)                                                #4
         b = BatchNormalization()(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=OrthogonalRegularizer(0.01))(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=OrthogonalRegularizer(0.01))(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01))(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01))(b)
         b = Dropout(0.3)(b)
         
         # decoder
@@ -103,7 +103,7 @@ class NeuralNetwork(object):
         d2 = concatenate([d2,e2])
         d2 = Conv2D(16, (3,3), padding='same', activation='relu', kernel_regularizer=l2(0.01))(d2)
         d2 = spatialAttention(d2)
-        d1 = Conv2DTranspose(4, (3, 3), strides=(2, 2), padding='same', activation='relu', kernel_regularizer=OrthogonalRegularizer(0.01))(d2)  #128
+        d1 = Conv2DTranspose(4, (3, 3), strides=(2, 2), padding='same', activation='relu')(d2)  #128
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same')(d1)
 
         return Model(inputs=network_input, outputs=network_output)
