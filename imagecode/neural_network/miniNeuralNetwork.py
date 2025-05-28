@@ -6,6 +6,7 @@ from tensorflow.keras.utils import img_to_array, load_img
 from tensorflow.keras.optimizers import Adamax
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 from skimage.color import rgb2lab, lab2rgb, rgb2gray, gray2rgb
+from tensorflow.keras.saving import register_keras_serializable
 from math import ceil
 from modLayers import *
 from modMetrics import *
@@ -15,7 +16,7 @@ import os
 import tensorflow as tf
 
 
-class NeuralNetwork(object):
+class miniNeuralNetwork(object):
     def __init__(self, training_path="./dataset", epochs=50, batch_size=16, path_to_model=None, image_size=128):
         self.training_path = training_path
         self.image_size = image_size
@@ -34,7 +35,7 @@ class NeuralNetwork(object):
         if path_to_model is None:
             self.model = self.neural_network_structure()
         else:
-            self.model = NeuralNetwork.load_model_from_file(path_to_model)
+            self.model = miniNeuralNetwork.load_model_from_file(path_to_model)
 
     def neural_network_structure(self):
         network_input = Input(shape=(self.image_size, self.image_size, 1,))
@@ -43,49 +44,34 @@ class NeuralNetwork(object):
 
         e1 = Conv2D(16, (3, 3), activation='relu', padding='same')(network_input)   #128
         e1 = residualBlock(e1,16)
-        e1 = Conv2D(16, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e1)
         
         e2 = MaxPooling2D((2, 2))(e1)                                               #64
         e2 = BatchNormalization()(e2)
-        e2 = Conv2D(32, (3, 3), activation='relu', padding='same')(e2)
-        e2 = residualBlockCB(e2, 32)
+        e2 = residualBlockCB(e2, 16)
         e2 = Conv2D(32, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e2)
         
         e3 = MaxPooling2D((2, 2))(e2)                                               #32
         e3 = BatchNormalization()(e3)
-        e3 = Conv2D(64, (3, 3), activation='relu', padding='same')(e3)
-        e3 = residualBlockCB(e3, 64)
+        e3 = residualBlockCB(e3, 32)
         e3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e3)
         
         e4 = MaxPooling2D((2, 2))(e3)                                               #16
         e4 = BatchNormalization()(e4)
         e4 = Conv2D(128, (3, 3), activation='relu', padding='same')(e4)
-        e4 = residualBlockCB(e4,128)
         e4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e4)
         
-        e5 = MaxPooling2D((2,2))(e4)                                                #8
-        e5 = BatchNormalization()(e5)
-        e5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e5)
-        e5 = residualBlock(e5,256)
         
         # cuello de botella
         
-        b = MaxPooling2D((2, 2))(e5)                                                #4
+        b = MaxPooling2D((2, 2))(e4)                                                #4
         b = BatchNormalization()(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01))(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01))(b)
+        b = Conv2D(128, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01))(b)
+        b = Conv2D(128, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01))(b)
         b = Dropout(0.3)(b)
         
         # decoder
         
-        d5 = Conv2DTranspose(256, (3,3), strides=(2,2), padding='same', activation='relu')(b)  #8
-        d5 = BatchNormalization()(d5)
-        d5 = concatenate([d5,e5])
-        d5 = Conv2D(256, (3,3), activation='relu', padding='same')(d5)
-        d5 = spatialAttention(d5)
-        d5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(d5)
-        
-        d4 = UpSampling2D((2, 2))(d5)                                                            #16
+        d4 = UpSampling2D((2, 2))(b)                                                            #16
         d4 = BatchNormalization()(d4)
         d4 = concatenate([d4,e4])
         d4 = Conv2D(128, (3, 3), activation='relu', padding='same')(d4)
@@ -111,28 +97,33 @@ class NeuralNetwork(object):
 
     @staticmethod
     def load_model_from_file(filename):
-        return load_model(filename)
-        
+        return load_model(filename)  
+
     def image_gen(self, subset='training'):
         generator = self.datagen.flow_from_directory(
             directory=self.training_path,
             classes=None,
             target_size=(self.image_size, self.image_size),
             batch_size=self.batch_size,
-            subset=subset,  # 'training' o 'validation' para división aleatoria
+            subset=subset,
             class_mode=None,
             shuffle=True
         )
         print(f"Imágenes encontradas para {subset}: {generator.samples}")
+        if generator.samples == 0:
+            raise ValueError(f"No se encontraron imágenes en {self.training_path} para {subset}")
+        return generator
+
+    def preprocess_generator(self, generator):
         for batch in generator:
-            _batch = (1.0 / 255) * batch  # Eliminamos batch[0]
+            _batch = (1.0 / 255) * batch
             lab_batch = rgb2lab(_batch)
             x_batch = lab_batch[:, :, :, 0] / 100.0
             y_batch = lab_batch[:, :, :, 1:] / 128.0
             yield (x_batch[:, :, :, None], y_batch)
 
     def train(self):
-        opt = Adamax(learning_rate=0.001) 
+        opt = Adamax(learning_rate=0.001)
         patience = 20
         tb_callback = keras.callbacks.TensorBoard(
             log_dir='./logs',
@@ -149,14 +140,26 @@ class NeuralNetwork(object):
         )
         early_stop = EarlyStopping(monitor='val_loss', patience=patience)
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
-        
-        self.model.compile(optimizer=opt, loss='mse', metrics=[self.psnr, self.ssim])
-        
+
+        self.model.compile(optimizer=opt, loss='mse', metrics=[psnr,ssim])
+
+        # Crear generadores
+        train_generator = self.image_gen(subset='training')
+        val_generator = self.image_gen(subset='validation')
+
+        # Preprocesar los generadores
+        train_generator_preprocessed = self.preprocess_generator(train_generator)
+        val_generator_preprocessed = self.preprocess_generator(val_generator)
+
+        # Calcular pasos por época
+        train_steps = ceil(train_generator.samples / self.batch_size)
+        val_steps = ceil(val_generator.samples / self.batch_size)
+
         self.model.fit(
-            self.image_gen(subset='training'),
-            steps_per_epoch=ceil(self.training_set_size * 0.8 / self.batch_size),
-            validation_data=self.image_gen(subset='validation'),
-            validation_steps=ceil(self.training_set_size * 0.2 / self.batch_size),
+            train_generator_preprocessed,
+            steps_per_epoch=train_steps,
+            validation_data=val_generator_preprocessed,
+            validation_steps=val_steps,
             epochs=self.epochs,
             callbacks=[tb_callback, model_checkpoint, early_stop, reduce_lr]
         )
