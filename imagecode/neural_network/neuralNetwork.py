@@ -119,20 +119,26 @@ class NeuralNetwork(object):
             classes=None,
             target_size=(self.image_size, self.image_size),
             batch_size=self.batch_size,
-            subset=subset,  # 'training' o 'validation' para división aleatoria
+            subset=subset,
             class_mode=None,
             shuffle=True
         )
         print(f"Imágenes encontradas para {subset}: {generator.samples}")
+        if generator.samples == 0:
+            raise ValueError(f"No se encontraron imágenes en {self.training_path} para {subset}")
+        return generator
+
+    def preprocess_generator(self, generator):
         for batch in generator:
-            _batch = (1.0 / 255) * batch  # Eliminamos batch[0]
+            _batch = (1.0 / 255) * batch
             lab_batch = rgb2lab(_batch)
             x_batch = lab_batch[:, :, :, 0] / 100.0
             y_batch = lab_batch[:, :, :, 1:] / 128.0
             yield (x_batch[:, :, :, None], y_batch)
 
+
     def train(self):
-        opt = Adamax(learning_rate=0.001) 
+        opt = Adamax(learning_rate=0.001)
         patience = 20
         tb_callback = keras.callbacks.TensorBoard(
             log_dir='./logs',
@@ -149,14 +155,26 @@ class NeuralNetwork(object):
         )
         early_stop = EarlyStopping(monitor='val_loss', patience=patience)
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
-        
-        self.model.compile(optimizer=opt, loss='mse', metrics=[self.psnr, self.ssim])
-        
+
+        self.model.compile(optimizer=opt, loss='mse', metrics=[psnr,ssim])
+
+        # Crear generadores
+        train_generator = self.image_gen(subset='training')
+        val_generator = self.image_gen(subset='validation')
+
+        # Preprocesar los generadores
+        train_generator_preprocessed = self.preprocess_generator(train_generator)
+        val_generator_preprocessed = self.preprocess_generator(val_generator)
+
+        # Calcular pasos por época
+        train_steps = ceil(train_generator.samples / self.batch_size)
+        val_steps = ceil(val_generator.samples / self.batch_size)
+
         self.model.fit(
-            self.image_gen(subset='training'),
-            steps_per_epoch=ceil(self.training_set_size * 0.8 / self.batch_size),
-            validation_data=self.image_gen(subset='validation'),
-            validation_steps=ceil(self.training_set_size * 0.2 / self.batch_size),
+            train_generator_preprocessed,
+            steps_per_epoch=train_steps,
+            validation_data=val_generator_preprocessed,
+            validation_steps=val_steps,
             epochs=self.epochs,
             callbacks=[tb_callback, model_checkpoint, early_stop, reduce_lr]
         )
