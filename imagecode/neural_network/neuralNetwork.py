@@ -73,8 +73,8 @@ class NeuralNetwork(object):
         
         b = MaxPooling2D((2, 2))(e5)                                                #4
         b = BatchNormalization()(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01), kernel_initialization=Orthogonal())(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01), kernel_initialization=Orthogonal())(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01), kernel_initializer=Orthogonal())(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01), kernel_initializer=Orthogonal())(b)
         b = Dropout(0.3)(b)
         
         # decoder
