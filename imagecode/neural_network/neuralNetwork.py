@@ -6,6 +6,7 @@ from tensorflow.keras.utils import img_to_array, load_img
 from tensorflow.keras.optimizers import Adamax
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 from skimage.color import rgb2lab, lab2rgb, rgb2gray, gray2rgb
+from tensorflow.keras.initializers import Orthogonal
 from math import ceil
 from modLayers import *
 from modMetrics import *
@@ -72,8 +73,8 @@ class NeuralNetwork(object):
         
         b = MaxPooling2D((2, 2))(e5)                                                #4
         b = BatchNormalization()(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01))(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01))(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01), kernel_initialization=Orthogonal())(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1(0.01), kernel_initialization=Orthogonal())(b)
         b = Dropout(0.3)(b)
         
         # decoder
