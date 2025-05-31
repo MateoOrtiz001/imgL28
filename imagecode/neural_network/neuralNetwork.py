@@ -10,6 +10,7 @@ from tensorflow.keras.initializers import Orthogonal
 from math import ceil
 from modLayers import *
 from modMetrics import *
+from dataUtils import load_all_images_lab, build_patch_dataset
 import keras
 import numpy as np
 import os
@@ -118,12 +119,15 @@ class NeuralNetwork(object):
         generator = self.datagen.flow_from_directory(
             directory=self.training_path,
             classes=None,
-            target_size=(self.image_size, self.image_size),
+            target_size=(self.image_size*4, self.image_size*4),
             batch_size=self.batch_size,
             subset=subset,
             class_mode=None,
             shuffle=True
         )
+        
+        numpatches = (self.image_size*4 - self.image_size) // (self.image_size - 32)
+        generator.total_patches = generator.samples * numpatches * 2
         print(f"Imágenes encontradas para {subset}: {generator.samples}")
         if generator.samples == 0:
             raise ValueError(f"No se encontraron imágenes en {self.training_path} para {subset}")
@@ -131,11 +135,35 @@ class NeuralNetwork(object):
 
     def preprocess_generator(self, generator):
         for batch in generator:
-            _batch = (1.0 / 255) * batch
-            lab_batch = rgb2lab(_batch)
-            x_batch = lab_batch[:, :, :, 0] / 100.0
-            y_batch = lab_batch[:, :, :, 1:] / 128.0
-            yield (x_batch[:, :, :, None], y_batch)
+            _batch = (1.0 / 255) * batch  # Normaliza a [0, 1]
+            lab_batch = rgb2lab(_batch)    # Convierte a LAB
+            
+            # Listas para almacenar parches
+            x_batch = []
+            y_batch = []
+            
+            for img in lab_batch:
+                L = img[:, :, 0] / 100.0   # Canal L normalizado [-1, 1]
+                ab = img[:, :, 1:] / 128.0 # Canales A y B normalizados [-1, 1]
+                
+                # Genera coordenadas aleatorias para el parche
+                h, w = L.shape
+                if h >= self.image_size and w >= self.image_size:
+                    y = np.random.randint(0, h - self.image_size)
+                    x = np.random.randint(0, w - self.image_size)
+                    
+                    # Extrae el parche
+                    L_patch = L[y:y+self.image_size, x:x+self.image_size]
+                    ab_patch = ab[y:y+self.image_size, x:x+self.image_size]
+                    
+                    x_batch.append(L_patch)
+                    y_batch.append(ab_patch)
+            
+            # Convierte a arrays y añade dimensión del canal
+            x_batch = np.array(x_batch)[:, :, :, None]  # Forma: (batch, 128, 128, 1)
+            y_batch = np.array(y_batch)                 # Forma: (batch, 128, 128, 2)
+            
+            yield (x_batch, y_batch)
 
 
     def train(self):
@@ -159,22 +187,26 @@ class NeuralNetwork(object):
 
         self.model.compile(optimizer=opt, loss='mse', metrics=[psnr,ssim])
 
-        # Crear generadores
-        train_generator = self.image_gen(subset='training')
-        val_generator = self.image_gen(subset='validation')
+        # Preprocesar imágenes una sola vez
+        all_images_lab = load_all_images_lab(self.training_path, self.image_size*4)
 
-        # Preprocesar los generadores
-        train_generator_preprocessed = self.preprocess_generator(train_generator)
-        val_generator_preprocessed = self.preprocess_generator(val_generator)
+        # División simple: 80% entrenamiento, 20% validación
+        split_index = int(len(all_images_lab) * 0.8)
+        train_images_lab = all_images_lab[:split_index]
+        val_images_lab = all_images_lab[split_index:]
 
-        # Calcular pasos por época
-        train_steps = ceil(train_generator.samples / self.batch_size)
-        val_steps = ceil(val_generator.samples / self.batch_size)
+        train_dataset = build_patch_dataset(train_images_lab, self.image_size, self.batch_size)
+        val_dataset = build_patch_dataset(val_images_lab, self.image_size, self.batch_size)
+
+        steps_per_epoch = ceil(len(train_images_lab) * 4) 
+        val_steps = ceil(len(val_images_lab) * 4)
+
+        self.model.compile(optimizer=opt, loss='mse', metrics=[psnr, ssim])
 
         self.model.fit(
-            train_generator_preprocessed,
-            steps_per_epoch=train_steps,
-            validation_data=val_generator_preprocessed,
+            train_dataset,
+            steps_per_epoch=steps_per_epoch,
+            validation_data=val_dataset,
             validation_steps=val_steps,
             epochs=self.epochs,
             callbacks=[tb_callback, model_checkpoint, early_stop, reduce_lr]
