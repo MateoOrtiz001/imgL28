@@ -1,4 +1,4 @@
-from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, Reshape, concatenate, MaxPooling2D, SpatialDropout2D, BatchNormalization, Conv2DTranspose
+from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, LeakyReLU, concatenate, MaxPooling2D, SpatialDropout2D, BatchNormalization, Conv2DTranspose
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.regularizers import l1, l2, OrthogonalRegularizer, l1_l2
 from tensorflow.keras.preprocessing.image import  ImageDataGenerator
@@ -17,7 +17,7 @@ import tensorflow as tf
 
 
 class NeuralNetwork(object):
-    def __init__(self, training_path="./dataset", epochs=50, batch_size=16, path_to_model=None, image_size=128):
+    def __init__(self, training_path="./dataset", epochs=50, batch_size=16, path_to_Genmodel=None, path_to_Dismodel=None, image_size=128):
         self.training_path = training_path
         self.image_size = image_size
         self.epochs = epochs
@@ -25,19 +25,24 @@ class NeuralNetwork(object):
 
         # Solo calcula el tamaño del training set si es necesario (entrenamiento)
         self.training_set_size = 0
-        if path_to_model is None and os.path.exists(self.training_path):
+        if path_to_Genmodel is None and os.path.exists(self.training_path):
             for filename in os.listdir(self.training_path):
                 if filename.endswith((".png", ".jpg", ".jpeg")):
                     self.training_set_size += 1
                     
         self.datagen = ImageDataGenerator(shear_range=0.2, zoom_range=0.2, rotation_range=20, horizontal_flip=True,validation_split=0.2)
         
-        if path_to_model is None:
-            self.model = self.neural_network_structure()
+        if path_to_Genmodel is None:
+#            self.model = self.genNetwork()
+            self.generator = self.genNetwork()  # Tu autoencoder (generador)
+            self.discriminator = self.disNetwork(image_shape=(image_size, image_size, 3))
+            self.gan = self.build_gan(self.generator, self.discriminator)
         else:
-            self.model = NeuralNetwork.load_model_from_file(path_to_model)
+            self.generator = NeuralNetwork.load_model_from_file(path_to_Genmodel)
+            self.discriminator = NeuralNetwork.load_model_from_file(path_to_Dismodel)
+            
 
-    def neural_network_structure(self):
+    def genNetwork(self):
         network_input = Input(shape=(None, None, 1,))
 
         #encoder
@@ -111,6 +116,39 @@ class NeuralNetwork(object):
 
         return Model(inputs=network_input, outputs=network_output)
 
+    def disNetwork(image_shape=(128, 128, 3)):
+        """Discriminador PatchGAN (70x70)"""
+        input_image = Input(shape=image_shape)  # Imagen real
+        generated_image = Input(shape=image_shape)  # Imagen generada por el autoencoder
+        combined = concatenate()([input_image, generated_image])
+        
+        d = Conv2D(64, (4, 4), strides=(2, 2), padding='same')(combined)
+        d = LeakyReLU(alpha=0.2)(d)
+        
+        d = Conv2D(128, (4, 4), strides=(2, 2), padding='same')(d)
+        d = BatchNormalization()(d)
+        d = LeakyReLU(alpha=0.2)(d)
+        
+        d = Conv2D(256, (4, 4), strides=(2, 2), padding='same')(d)
+        d = BatchNormalization()(d)
+        d = LeakyReLU(alpha=0.2)(d)
+        
+        d = Conv2D(512, (4, 4), strides=(1, 1), padding='same')(d)
+        d = BatchNormalization()(d)
+        d = LeakyReLU(alpha=0.2)(d)
+        d = Conv2D(1, (4, 4), strides=(1, 1), padding='same', activation='sigmoid')(d)
+        
+        return Model(inputs=[input_image, generated_image], outputs=d)
+
+
+    def build_gan(self,image_shape=(128, 128, 1)):
+        self.discriminator.trainable = False
+        input_gray = Input(shape=image_shape)
+        generated_color = self.generator(input_gray)
+        validity = self.discriminator([input_gray, generated_color])
+        combined = Model(inputs=input_gray, outputs=[validity, generated_color])
+        return combined
+    
     @staticmethod
     def load_model_from_file(filename):
         return load_model(filename)
@@ -138,9 +176,32 @@ class NeuralNetwork(object):
             y_batch = lab_batch[:, :, :, 1:] / 128.0
             yield (x_batch[:, :, :, None], y_batch)
 
+    def compile_models(self):
+        # Optimizadores
+        opt_d = Adamax(learning_rate=0.0002, beta_1=0.5)
+        opt_g = Adamax(learning_rate=0.0001)
+        
+        # Compilar discriminador
+        self.discriminator.compile(
+            optimizer=opt_d,
+            loss='binary_crossentropy',
+            metrics=['accuracy']
+        )
+        
+        # Congelar discriminador durante el entrenamiento GAN
+        self.discriminator.trainable = False
+        
+        # Compilar GAN 
+        self.gan.compile(
+            optimizer=opt_g,
+            loss=['binary_crossentropy', 'mse'],  # Pérdida adversarial + L1/L2
+            loss_weights=[1, 100],  # Peso para adversarial vs. MSE
+            metrics=[psnr, ssim]
+        )
 
     def train(self):
-        opt = Adamax(learning_rate=0.001)
+        self.compile_models()
+        
         patience = 20
         tb_callback = keras.callbacks.TensorBoard(
             log_dir='./logs',
@@ -158,8 +219,6 @@ class NeuralNetwork(object):
         early_stop = EarlyStopping(monitor='val_loss', patience=patience)
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
 
-        self.model.compile(optimizer=opt, loss='mse', metrics=[psnr,ssim])
-
         # Crear generadores
         train_generator = self.image_gen(subset='training')
         val_generator = self.image_gen(subset='validation')
@@ -173,18 +232,39 @@ class NeuralNetwork(object):
         train_steps = ceil(train_generator.samples / self.batch_size)
         val_steps = ceil(val_generator.samples / self.batch_size)
 
-        self.model.fit(
-            train_generator_preprocessed,
-            steps_per_epoch=train_steps,
-            validation_data=val_generator_preprocessed,
-            validation_steps=val_steps,
-            epochs=self.epochs,
-            callbacks=[tb_callback, model_checkpoint, early_stop, reduce_lr]
-        )
+        real_labels = np.ones((self.batch_size, 16, 16, 1))
+        fake_labels = np.zeros((self.batch_size, 16, 16, 1))
+        
+        for epoch in range(self.epochs):
+            print(f"Epoch {epoch + 1}/{self.epochs}")
+            
+            for _ in range(train_steps):
+                x_batch, y_batch = next(train_generator_preprocessed)
+                generated_ab = self.generator.predict(x_batch)
+                lab_real = np.concatenate([x_batch, y_batch], axis=-1)
+                lab_fake = np.concatenate([x_batch, generated_ab], axis=-1)
+                
+                d_loss_real = self.discriminator.train_on_batch(lab_real, real_labels)
+                d_loss_fake = self.discriminator.train_on_batch(lab_fake, fake_labels)
+                d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+            
+            g_loss = self.gan.fit(
+                train_generator_preprocessed,
+                steps_per_epoch=train_steps,
+                validation_data=val_generator_preprocessed,
+                validation_steps=val_steps,
+                epochs=1,
+                callbacks=[tb_callback, model_checkpoint, early_stop, reduce_lr],
+                verbose=1
+            ).history['loss'][0]
+            
+            print(f"D Loss: {d_loss[0]:.4f}, D Acc: {d_loss[1]:.4f}, G Loss: {g_loss:.4f}")
 
     def save_model(self):
-        self.model.save_weights('weights_{}e_pic.weights.h5'.format(self.epochs))
-        self.model.save('model_{}e_pic_m.keras'.format(self.epochs))
+        self.generator.save_weights('generator_weights_{}e_pic.weights.h5'.format(self.epochs))
+        self.generator.save('generator_model_{}e_pic_m.keras'.format(self.epochs))
+        self.discriminator.save_weights('discriminator_weights_{}e_pic.weights.h5'.format(self.epochs))
+        self.discriminator.save('discriminator_model_{}e_pic_m.keras'.format(self.epochs))
 
     def run(self):
         self.train()
