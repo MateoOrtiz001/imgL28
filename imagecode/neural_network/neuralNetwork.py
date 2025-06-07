@@ -1,9 +1,9 @@
-from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, LeakyReLU, concatenate, MaxPooling2D, SpatialDropout2D, BatchNormalization, Conv2DTranspose
+from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, LeakyReLU, concatenate, MaxPooling2D, Dropout, SpatialDropout2D, BatchNormalization, Conv2DTranspose
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.regularizers import l1, l2, OrthogonalRegularizer, l1_l2
 from tensorflow.keras.preprocessing.image import  ImageDataGenerator
 from tensorflow.keras.utils import img_to_array, load_img
-from tensorflow.keras.optimizers import Adamax
+from tensorflow.keras.optimizers import Adamax, Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 from skimage.color import rgb2lab, lab2rgb, rgb2gray, gray2rgb
 from tensorflow.keras.initializers import Orthogonal, HeNormal
@@ -50,29 +50,29 @@ class NeuralNetwork(object):
 
         e1 = Conv2D(16, (3, 3), activation='relu', padding='same')(network_input)   #128
         e1 = residualBlock(e1,16)
-        e1 = Conv2D(16, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e1)
+        e1 = Conv2D(16, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.0005))(e1)
         
         e2 = MaxPooling2D((2, 2))(e1)                                               #64
         e2 = BatchNormalization()(e2)
         e2 = Conv2D(32, (3, 3), activation='relu', padding='same')(e2)
         e2 = residualBlockCB(e2, 32)
-        e2 = Conv2D(32, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e2)
+        e2 = Conv2D(32, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.0005))(e2)
         
         e3 = MaxPooling2D((2, 2))(e2)                                               #32
         e3 = BatchNormalization()(e3)
         e3 = Conv2D(64, (3, 3), activation='relu', padding='same')(e3)
         e3 = residualBlockCB(e3, 64)
-        e3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e3)
+        e3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(e3)
         
         e4 = MaxPooling2D((2, 2))(e3)                                               #16
         e4 = BatchNormalization()(e4)
         e4 = Conv2D(128, (3, 3), activation='relu', padding='same')(e4)
         e4 = residualBlockCB(e4,128)
-        e4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e4)
+        e4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(e4)
         
         e5 = MaxPooling2D((2,2))(e4)                                                #8
         e5 = BatchNormalization()(e5)
-        e5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(e5)
+        e5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.005))(e5)
         e5 = residualBlock(e5,256)
         
         # cuello de botella
@@ -91,26 +91,26 @@ class NeuralNetwork(object):
         d5 = concatenate([d5,e5])
         d5 = Conv2D(256, (3,3), activation='relu', padding='same')(d5)
         d5 = spatialAttention(d5)
-        d5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(d5)
+        d5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.0005))(d5)
         
         d4 = UpSampling2D((2, 2))(d5)                                                            #16
         d4 = BatchNormalization()(d4)
         d4 = concatenate([d4,e4])
         d4 = Conv2D(128, (3, 3), activation='relu', padding='same')(d4)
         d4 = spatialAttention(d4)
-        d4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(d4)
+        d4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(d4)
 
         d3 = UpSampling2D((2, 2))(d4)                                                           #32
         d3 = BatchNormalization()(d3)
         d3 = concatenate([d3,e3])
         d3 = Conv2D(64, (3, 3), activation='relu', padding='same')(d3)
         d3 = spatialAttention(d3)
-        d3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.01))(d3)
+        d3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(d3)
         
         d2 = Conv2DTranspose(32, (3, 3), strides=(2,2), padding='same', activation='relu')(d3)   #64
         d2 = BatchNormalization()(d2)
         d2 = concatenate([d2,e2])
-        d2 = Conv2D(32, (3,3), padding='same', activation='relu', kernel_regularizer=l2(0.01))(d2)
+        d2 = Conv2D(32, (3,3), padding='same', activation='relu', kernel_regularizer=l2(0.001))(d2)
         d2 = spatialAttention(d2)
         d1 = Conv2DTranspose(8, (3, 3), strides=(2, 2), padding='same', activation='relu')(d2)  #128
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same', name='colOutput')(d1)
@@ -131,10 +131,8 @@ class NeuralNetwork(object):
         d = Conv2D(256, (4, 4), strides=(2, 2), padding='same')(d)
         d = BatchNormalization()(d)
         d = LeakyReLU(alpha=0.2)(d)
+        d = Dropout(0.3)(d)
         
-        d = Conv2D(512, (4, 4), strides=(1, 1), padding='same')(d)
-        d = BatchNormalization()(d)
-        d = LeakyReLU(alpha=0.2)(d)
         d = Conv2D(1, (4, 4), strides=(1, 1), padding='same', activation='sigmoid', name="disOutput")(d)
         
         return Model(inputs=input, outputs=d, name="discriminator")
@@ -192,8 +190,8 @@ class NeuralNetwork(object):
 
     def compile_models(self):
         # Optimizadores
-        opt_d = Adamax(learning_rate=0.0001, beta_1=0.5)
-        opt_g = Adamax(learning_rate=0.0001)
+        opt_d = Adam(learning_rate=0.0001, beta_1=0.5)
+        opt_g = Adam(learning_rate=0.0002)
         
         # Compilar discriminador
         self.discriminator.compile(
@@ -205,12 +203,11 @@ class NeuralNetwork(object):
         # Congelar discriminador durante el entrenamiento GAN
         self.discriminator.trainable = False
         
-        output_names = [output.name for output in self.gan.outputs]
         # Compilar GAN 
         self.gan.compile(
             optimizer=opt_g,
             loss=['binary_crossentropy', 'mae'],  # Pérdida adversarial + L1/L2
-            loss_weights=[1, 100],  # Peso para adversarial vs. MSE
+            loss_weights=[1, 50],  # Peso para adversarial vs. MSE
             metrics={
                 'validity_output': ['accuracy'],
                 'color_output': [psnr, ssim]
@@ -260,8 +257,8 @@ class NeuralNetwork(object):
                     x_batch, (validity_labels, y_batch) = next(iterator)
                 
                 current_batch_size = x_batch.shape[0]
-                real_labels = np.ones((current_batch_size, 16, 16, 1))
-                fake_labels = np.zeros((current_batch_size, 16, 16, 1))
+                real_labels = np.ones((current_batch_size, 16, 16, 1)) * 0.9
+                fake_labels = np.zeros((current_batch_size, 16, 16, 1)) + 0.1
                 
                 # Generar imágenes falsas
                 generated_ab = self.generator.predict(x_batch, verbose=0)

@@ -1,6 +1,4 @@
-from tensorflow.keras.layers import Add
-from tensorflow.keras.layers import Conv2D, BatchNormalization
-from tensorflow.keras.layers import Multiply
+from tensorflow.keras.layers import Add, Activation, Multiply, Conv2D, BatchNormalization
 from tensorflow.keras.saving import register_keras_serializable
 
 @register_keras_serializable()
@@ -16,6 +14,7 @@ def residualBlock(x, filters):
     x = Conv2D(filters, (3, 3), padding='same')(x)
     x = BatchNormalization()(x)
     x = Add()([x, shortcut])  # Conexión residual
+    x = Activation('relu')(x)
     return x
 
 @register_keras_serializable()
@@ -28,4 +27,5 @@ def residualBlockCB(x, filters):
     x = Conv2D(filters, (1,1), padding='same')(x)
     x = BatchNormalization()(x)
     x = Add()([x,shortcut])
+    x = Activation('relu')(x)
     return x
