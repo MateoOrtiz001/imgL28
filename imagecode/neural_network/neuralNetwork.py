@@ -8,6 +8,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLRO
 from skimage.color import rgb2lab, lab2rgb, rgb2gray, gray2rgb
 from tensorflow.keras.initializers import Orthogonal, HeNormal
 from math import ceil
+import time
 from modLayers import *
 from modMetrics import *
 import keras
@@ -34,9 +35,9 @@ class NeuralNetwork(object):
         
         if path_to_Genmodel is None:
 #            self.model = self.genNetwork()
-            self.generator = self.genNetwork()  # Tu autoencoder (generador)
-            self.discriminator = self.disNetwork(image_shape=(image_size, image_size, 3))
-            self.gan = self.build_gan(self.generator, self.discriminator)
+            self.generator = self.genNetwork()
+            self.discriminator = self.disNetwork()
+            self.gan = self.build_gan()
         else:
             self.generator = NeuralNetwork.load_model_from_file(path_to_Genmodel)
             self.discriminator = NeuralNetwork.load_model_from_file(path_to_Dismodel)
@@ -112,17 +113,15 @@ class NeuralNetwork(object):
         d2 = Conv2D(32, (3,3), padding='same', activation='relu', kernel_regularizer=l2(0.01))(d2)
         d2 = spatialAttention(d2)
         d1 = Conv2DTranspose(8, (3, 3), strides=(2, 2), padding='same', activation='relu')(d2)  #128
-        network_output = Conv2D(2, (3, 3), activation='tanh', padding='same')(d1)
+        network_output = Conv2D(2, (3, 3), activation='tanh', padding='same', name='colOutput')(d1)
 
-        return Model(inputs=network_input, outputs=network_output)
+        return Model(inputs=network_input, outputs=network_output, name="colorizer")
 
-    def disNetwork(image_shape=(128, 128, 3)):
+    def disNetwork(self):
         """Discriminador PatchGAN (70x70)"""
-        input_image = Input(shape=image_shape)  # Imagen real
-        generated_image = Input(shape=image_shape)  # Imagen generada por el autoencoder
-        combined = concatenate()([input_image, generated_image])
+        input = Input(shape=(self.image_size, self.image_size, 3))
         
-        d = Conv2D(64, (4, 4), strides=(2, 2), padding='same')(combined)
+        d = Conv2D(64, (4, 4), strides=(2, 2), padding='same')(input)
         d = LeakyReLU(alpha=0.2)(d)
         
         d = Conv2D(128, (4, 4), strides=(2, 2), padding='same')(d)
@@ -136,17 +135,18 @@ class NeuralNetwork(object):
         d = Conv2D(512, (4, 4), strides=(1, 1), padding='same')(d)
         d = BatchNormalization()(d)
         d = LeakyReLU(alpha=0.2)(d)
-        d = Conv2D(1, (4, 4), strides=(1, 1), padding='same', activation='sigmoid')(d)
+        d = Conv2D(1, (4, 4), strides=(1, 1), padding='same', activation='sigmoid', name="disOutput")(d)
         
-        return Model(inputs=[input_image, generated_image], outputs=d)
+        return Model(inputs=input, outputs=d, name="discriminator")
 
 
-    def build_gan(self,image_shape=(128, 128, 1)):
+    def build_gan(self):
         self.discriminator.trainable = False
-        input_gray = Input(shape=image_shape)
+        input_gray = Input(shape=(self.image_size, self.image_size,1))
         generated_color = self.generator(input_gray)
-        validity = self.discriminator([input_gray, generated_color])
-        combined = Model(inputs=input_gray, outputs=[validity, generated_color])
+        validity = self.discriminator(concatenate([input_gray, generated_color], axis=-1))
+        combined = Model(inputs=input_gray, outputs=[validity, generated_color],name="gan")
+        combined.output_names = ["validity_output", "color_output"]
         return combined
     
     @staticmethod
@@ -169,16 +169,30 @@ class NeuralNetwork(object):
         return generator
 
     def preprocess_generator(self, generator):
-        for batch in generator:
-            _batch = (1.0 / 255) * batch
-            lab_batch = rgb2lab(_batch)
-            x_batch = lab_batch[:, :, :, 0] / 100.0
-            y_batch = lab_batch[:, :, :, 1:] / 128.0
-            yield (x_batch[:, :, :, None], y_batch)
+        def gen():
+            for batch in generator:
+                _batch = (1.0 / 255) * batch
+                lab_batch = rgb2lab(_batch)
+                x_batch = lab_batch[:, :, :, 0] / 100.0
+                x_batch = x_batch[:, :, :, None]
+                y_batch = lab_batch[:, :, :, 1:] / 128.0
+                current_batch_size = x_batch.shape[0]
+                validity_labels = np.ones((current_batch_size, 16, 16, 1))
+                yield (x_batch, (validity_labels, y_batch))  # Cambiar lista a tupla
+
+        output_signature = (
+            tf.TensorSpec(shape=(None, self.image_size, self.image_size, 1), dtype=tf.float32),
+            (
+                tf.TensorSpec(shape=(None, 16, 16, 1), dtype=tf.float32),
+                tf.TensorSpec(shape=(None, self.image_size, self.image_size, 2), dtype=tf.float32)
+            )
+        )
+        
+        return tf.data.Dataset.from_generator(gen, output_signature=output_signature)
 
     def compile_models(self):
         # Optimizadores
-        opt_d = Adamax(learning_rate=0.0002, beta_1=0.5)
+        opt_d = Adamax(learning_rate=0.0001, beta_1=0.5)
         opt_g = Adamax(learning_rate=0.0001)
         
         # Compilar discriminador
@@ -191,12 +205,16 @@ class NeuralNetwork(object):
         # Congelar discriminador durante el entrenamiento GAN
         self.discriminator.trainable = False
         
+        output_names = [output.name for output in self.gan.outputs]
         # Compilar GAN 
         self.gan.compile(
             optimizer=opt_g,
-            loss=['binary_crossentropy', 'mse'],  # Pérdida adversarial + L1/L2
+            loss=['binary_crossentropy', 'mae'],  # Pérdida adversarial + L1/L2
             loss_weights=[1, 100],  # Peso para adversarial vs. MSE
-            metrics=[psnr, ssim]
+            metrics={
+                'validity_output': ['accuracy'],
+                'color_output': [psnr, ssim]
+            }
         )
 
     def train(self):
@@ -218,47 +236,88 @@ class NeuralNetwork(object):
         )
         early_stop = EarlyStopping(monitor='val_loss', patience=patience)
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
-
-        # Crear generadores
+        
         train_generator = self.image_gen(subset='training')
         val_generator = self.image_gen(subset='validation')
-
-        # Preprocesar los generadores
-        train_generator_preprocessed = self.preprocess_generator(train_generator)
-        val_generator_preprocessed = self.preprocess_generator(val_generator)
-
-
-        # Calcular pasos por época
+        
         train_steps = ceil(train_generator.samples / self.batch_size)
         val_steps = ceil(val_generator.samples / self.batch_size)
-
-        real_labels = np.ones((self.batch_size, 16, 16, 1))
-        fake_labels = np.zeros((self.batch_size, 16, 16, 1))
+        print(f"Train steps: {train_steps}, Val steps: {val_steps}")
         
         for epoch in range(self.epochs):
             print(f"Epoch {epoch + 1}/{self.epochs}")
+            epoch_start_time = time.time()  
             
-            for _ in range(train_steps):
-                x_batch, y_batch = next(train_generator_preprocessed)
-                generated_ab = self.generator.predict(x_batch)
+            train_generator_preprocessed = self.preprocess_generator(train_generator)
+            iterator = iter(train_generator_preprocessed)
+            
+            for step in range(train_steps):
+                step_start_time = time.time()
+                try:
+                    x_batch, (validity_labels, y_batch) = next(iterator)
+                except StopIteration:
+                    iterator = iter(self.preprocess_generator(train_generator))
+                    x_batch, (validity_labels, y_batch) = next(iterator)
+                
+                current_batch_size = x_batch.shape[0]
+                real_labels = np.ones((current_batch_size, 16, 16, 1))
+                fake_labels = np.zeros((current_batch_size, 16, 16, 1))
+                
+                # Generar imágenes falsas
+                generated_ab = self.generator.predict(x_batch, verbose=0)
                 lab_real = np.concatenate([x_batch, y_batch], axis=-1)
                 lab_fake = np.concatenate([x_batch, generated_ab], axis=-1)
                 
+                # Entrenar discriminador
+                self.discriminator.trainable = True
                 d_loss_real = self.discriminator.train_on_batch(lab_real, real_labels)
                 d_loss_fake = self.discriminator.train_on_batch(lab_fake, fake_labels)
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+                
+                # Entrenar generador (a través de la GAN)
+                self.discriminator.trainable = False
+                g_loss = self.gan.train_on_batch(x_batch, [validity_labels, y_batch])
+                
+                step_time = time.time() - step_start_time
+                
+                if step % 100 == 0:
+                    print(f"Step {step}/{train_steps} - "
+                        f"D Loss: {d_loss[0]:.4f}, D Acc: {d_loss[1]:.4f}, G Loss: {g_loss[0]:.4f}, "
+                        f"Step Time: {step_time:.2f}s")
             
-            g_loss = self.gan.fit(
-                train_generator_preprocessed,
-                steps_per_epoch=train_steps,
+            # Validación al final de la época
+            val_generator_preprocessed = self.preprocess_generator(val_generator)
+            val_metrics = self.gan.evaluate(val_generator_preprocessed, steps=val_steps, verbose=0, return_dict=True)
+            
+            epoch_time = time.time() - epoch_start_time
+            
+            # Acceder a las métricas con los nombres correctos
+            try:
+                # Intentar acceder con los nombres de las salidas
+                psnr_val = val_metrics.get('color_output_psnr', val_metrics.get('psnr', 0))
+                ssim_val = val_metrics.get('color_output_ssim', val_metrics.get('ssim', 0))
+                
+                print(f"Validation Loss: {val_metrics['loss']:.4f}, "
+                    f"PSNR: {psnr_val:.4f}, SSIM: {ssim_val:.4f}, "
+                    f"Epoch Time: {int(epoch_time // 60)}m {epoch_time % 60:.2f}s")
+            except KeyError as e:
+                # Si hay problemas con las métricas, mostrar todas las claves disponibles
+                print(f"Available metrics keys: {list(val_metrics.keys())}")
+                print(f"Validation Loss: {val_metrics['loss']:.4f}, "
+                    f"Epoch Time: {int(epoch_time // 60)}m {epoch_time % 60:.2f}s")
+            
+            # Ejecutar callbacks manualmente
+            self.gan.fit(
+                self.preprocess_generator(train_generator),
+                steps_per_epoch=1,
                 validation_data=val_generator_preprocessed,
                 validation_steps=val_steps,
                 epochs=1,
                 callbacks=[tb_callback, model_checkpoint, early_stop, reduce_lr],
-                verbose=1
-            ).history['loss'][0]
-            
-            print(f"D Loss: {d_loss[0]:.4f}, D Acc: {d_loss[1]:.4f}, G Loss: {g_loss:.4f}")
+                verbose=0
+            )
+        
+        self.save_model()
 
     def save_model(self):
         self.generator.save_weights('generator_weights_{}e_pic.weights.h5'.format(self.epochs))
@@ -269,3 +328,20 @@ class NeuralNetwork(object):
     def run(self):
         self.train()
         self.save_model()
+
+    def debug_metrics(self):
+        """Función para debuggear los nombres de las métricas"""
+        self.compile_models()
+        print("Modelo GAN compilado:")
+        print(f"Nombres de las salidas: {[output.name for output in self.gan.outputs]}")
+        print(f"Nombres de las métricas: {self.gan.metrics_names}")
+        
+        # Crear un batch pequeño para probar
+        dummy_input = np.random.random((1, self.image_size, self.image_size, 1))
+        dummy_validity = np.ones((1, 16, 16, 1))
+        dummy_color = np.random.random((1, self.image_size, self.image_size, 2))
+        
+        # Evaluar con datos dummy
+        result = self.gan.evaluate(dummy_input, [dummy_validity, dummy_color], verbose=0, return_dict=True)
+        print(f"Claves de métricas disponibles: {list(result.keys())}")
+        return result
