@@ -119,21 +119,21 @@ class NeuralNetwork(object):
 
     def disNetwork(self):
         """Discriminador PatchGAN (70x70)"""
-        input = Input(shape=(self.image_size, self.image_size, 3))
+        input = Input(shape=(self.image_size, self.image_size, 3))      #(256)
         
-        d = Conv2D(64, (4, 4), strides=(2, 2), padding='same')(input)
+        d = Conv2D(32, (4, 4), strides=(2, 2), padding='same')(input)   #128
         d = LeakyReLU(alpha=0.2)(d)
         
-        d = Conv2D(128, (4, 4), strides=(2, 2), padding='same')(d)
+        d = Conv2D(56, (4, 4), strides=(2, 2), padding='same')(d)      #64
         d = BatchNormalization()(d)
         d = LeakyReLU(alpha=0.2)(d)
         
-        d = Conv2D(256, (4, 4), strides=(2, 2), padding='same')(d)
+        d = Conv2D(128, (4, 4), strides=(2, 2), padding='same')(d)      #32
         d = BatchNormalization()(d)
         d = LeakyReLU(alpha=0.2)(d)
-        d = Dropout(0.3)(d)
+        d = Dropout(0.5)(d)
         
-        d = Conv2D(1, (4, 4), strides=(1, 1), padding='same', activation='sigmoid', name="disOutput")(d)
+        d = Conv2D(1, (4, 4), strides=(1, 1), padding='same', activation='sigmoid', kernel_regularizer=l2(0.0005), name="disOutput")(d)
         
         return Model(inputs=input, outputs=d, name="discriminator")
 
@@ -175,13 +175,13 @@ class NeuralNetwork(object):
                 x_batch = x_batch[:, :, :, None]
                 y_batch = lab_batch[:, :, :, 1:] / 128.0
                 current_batch_size = x_batch.shape[0]
-                validity_labels = np.ones((current_batch_size, 16, 16, 1))
+                validity_labels = np.ones((current_batch_size, self.image_size//8, self.image_size//8, 1))
                 yield (x_batch, (validity_labels, y_batch))  # Cambiar lista a tupla
 
         output_signature = (
             tf.TensorSpec(shape=(None, self.image_size, self.image_size, 1), dtype=tf.float32),
             (
-                tf.TensorSpec(shape=(None, 16, 16, 1), dtype=tf.float32),
+                tf.TensorSpec(shape=(None, self.image_size//8, self.image_size//8, 1), dtype=tf.float32),
                 tf.TensorSpec(shape=(None, self.image_size, self.image_size, 2), dtype=tf.float32)
             )
         )
@@ -190,7 +190,7 @@ class NeuralNetwork(object):
 
     def compile_models(self):
         # Optimizadores
-        opt_d = Adam(learning_rate=0.0001, beta_1=0.5)
+        opt_d = Adam(learning_rate=0.00005, beta_1=0.5)
         opt_g = Adam(learning_rate=0.0002)
         
         # Compilar discriminador
@@ -248,8 +248,12 @@ class NeuralNetwork(object):
             train_generator_preprocessed = self.preprocess_generator(train_generator)
             iterator = iter(train_generator_preprocessed)
             
+            # Inicializar el último d_loss
+            last_d_loss = [0.0, 0.5]  # Pérdida inicial y accuracy razonable
+            t = 0
             for step in range(train_steps):
                 step_start_time = time.time()
+                    
                 try:
                     x_batch, (validity_labels, y_batch) = next(iterator)
                 except StopIteration:
@@ -257,23 +261,74 @@ class NeuralNetwork(object):
                     x_batch, (validity_labels, y_batch) = next(iterator)
                 
                 current_batch_size = x_batch.shape[0]
-                real_labels = np.ones((current_batch_size, 16, 16, 1)) * 0.9
-                fake_labels = np.zeros((current_batch_size, 16, 16, 1)) + 0.1
+                #real_labels = np.ones((current_batch_size, 16, 16, 1)) * 0.9
+                #fake_labels = np.zeros((current_batch_size, 16, 16, 1)) + 0.1
+                real_labels = np.ones((current_batch_size, self.image_size//8, self.image_size//8, 1))
+                fake_labels = np.zeros((current_batch_size, self.image_size//8, self.image_size//8, 1))
+                #real_labels = np.ones((current_batch_size, 16, 16, 1)) - np.random.uniform(0, 0.1, size=(current_batch_size, 16, 16, 1))  # 0.9–1.0
+                #fake_labels = np.random.uniform(0, 0.1, size=(current_batch_size, 16, 16, 1))  # 0.0–0.1
                 
                 # Generar imágenes falsas
                 generated_ab = self.generator.predict(x_batch, verbose=0)
                 lab_real = np.concatenate([x_batch, y_batch], axis=-1)
                 lab_fake = np.concatenate([x_batch, generated_ab], axis=-1)
+                noise_std = 0.03  # puedes ajustar
+                lab_fake += np.random.normal(loc=0.0, scale=noise_std, size=lab_fake.shape)
                 
-                # Entrenar discriminador
-                self.discriminator.trainable = True
-                d_loss_real = self.discriminator.train_on_batch(lab_real, real_labels)
-                d_loss_fake = self.discriminator.train_on_batch(lab_fake, fake_labels)
-                d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+                # Decidir si entrenar el discriminador basado en el accuracy de la iteración anterior
+                if (last_d_loss[1] <= 0.75) and (t == 0):  # Umbral de pausa
+                    self.discriminator.trainable = True
+                    d_loss_real = self.discriminator.train_on_batch(lab_real, real_labels)
+                    d_loss_fake = self.discriminator.train_on_batch(lab_fake, fake_labels)
+                    d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+                    last_d_loss = d_loss  # Actualizar el último d_loss
+                elif t > 1:
+                    t -= 1
+                    d_loss = last_d_loss
+                elif (last_d_loss[1] > 0.75) and (t == 0):
+                    print(f"Skipping discriminator training at step {step} (D Acc: {last_d_loss[1]:.4f})")
+                    t = train_steps//4
+                    d_loss = last_d_loss  # Mantener el último d_loss
+                elif (last_d_loss[1] > 0.75) and (t == 1):
+                    print(f"End of skipping discriminator training")
+                    self.discriminator.trainable = True
+                    d_loss_real = self.discriminator.train_on_batch(lab_real, real_labels)
+                    d_loss_fake = self.discriminator.train_on_batch(lab_fake, fake_labels)
+                    d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+                    last_d_loss = d_loss  # Actualizar el último d_loss   
+                    t -= 1 
+                
+                # Evaluar el accuracy del discriminador sin entrenarlo
+                # self.discriminator.trainable = False
+                # d_loss_real_eval = self.discriminator.evaluate(lab_real, real_labels, verbose=0, batch_size=current_batch_size)
+                # d_loss_fake_eval = self.discriminator.evaluate(lab_fake, fake_labels, verbose=0, batch_size=current_batch_size)
+                # d_loss_eval = [0.5 * (d_loss_real_eval[0] + d_loss_fake_eval[0]),
+                #             0.5 * (d_loss_real_eval[1] + d_loss_fake_eval[1])]
+                
+                # # Decidir si entrenar el discriminador
+                # if d_loss_eval[1] <= 0.75:  # Umbral de pausa
+                #     self.discriminator.trainable = True
+                #     d_loss_real = self.discriminator.train_on_batch(lab_real, real_labels)
+                #     d_loss_fake = self.discriminator.train_on_batch(lab_fake, fake_labels)
+                #     d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+                #     last_d_loss = d_loss  # Actualizar el último d_loss
+                # else:
+                #     print(f"Skipping discriminator training at step {step} (D Acc: {d_loss_eval[1]:.4f})")
+                #     d_loss = last_d_loss  # Usar el último d_loss válido
+                
+                # if d_loss[1] > 0.75:  # Umbral de pausa
+                #     print(f"Skipping discriminator training at step {step} (D Acc: {d_loss[1]:.4f})")
+                #     self.discriminator.trainable = False
+                #     # No actualizar d_loss, mantener el valor de train_on_batch
+                # else:
+                #     # El discriminador ya fue entrenado, usar d_loss directamente
+                #     pass
+                
                 
                 # Entrenar generador (a través de la GAN)
                 self.discriminator.trainable = False
-                g_loss = self.gan.train_on_batch(x_batch, [validity_labels, y_batch])
+                for _ in range(2):
+                    g_loss = self.gan.train_on_batch(x_batch, [validity_labels, y_batch])
                 
                 step_time = time.time() - step_start_time
                 
@@ -335,7 +390,7 @@ class NeuralNetwork(object):
         
         # Crear un batch pequeño para probar
         dummy_input = np.random.random((1, self.image_size, self.image_size, 1))
-        dummy_validity = np.ones((1, 16, 16, 1))
+        dummy_validity = np.ones((1, self.image_size//8, self.image_size//8, 1))
         dummy_color = np.random.random((1, self.image_size, self.image_size, 2))
         
         # Evaluar con datos dummy
