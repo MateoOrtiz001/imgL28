@@ -7,11 +7,9 @@ def lab_to_rgb_tensor(lab):
     """
     Función generada por DeepSeek.
     Args:
-        rgb: tensor (batch, H, W, 3) con valores en [0, 1] (ya normalizado por 255)
+        lab: tensor (batch, H, W, 3) con valores en [0, 1] (ya normalizado por 255)
     Returns:
-        lab: tensor (batch, H, W, 3) con:
-            L en [0,100] (sin normalizar)
-            ab en [-128,128] (sin normalizar)
+        rgb: tensor (batch, H, W, 3)
     """
     L = lab[..., 0] * 100.0
     a = lab[..., 1] * 128.0
