@@ -159,7 +159,7 @@ class NeuralNetwork(object):
         early_stop = EarlyStopping(monitor='val_loss', patience=patience)
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
 
-        self.model.compile(optimizer=opt, loss='mae', metrics=[psnr,ssim])
+        self.model.compile(optimizer=opt, loss=combined_loss, metrics=[psnr,ssim])
 
         # Crear generadores
         train_generator = self.image_gen(subset='training')
