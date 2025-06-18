@@ -10,6 +10,8 @@ from tensorflow.keras.initializers import Orthogonal, HeNormal
 from math import ceil
 from modLayers import *
 from modMetrics import *
+from modLoss import *
+from preprocess import *
 import keras
 import numpy as np
 import os
@@ -73,8 +75,8 @@ class NeuralNetwork(object):
         
         b = MaxPooling2D((2, 2))(e5)                                                #4
         b = BatchNormalization()(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=OrthogonalRegularizer(), kernel_initialization=Orthogonal())(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1_l2(l1=0.001, l2=0.005), kernel_initialization=HeNormal())(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(b)
+        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1_l2(l1=0.001, l2=0.005), kernel_initializer=HeNormal())(b)
         b = Dropout(0.3)(b)
         
         # decoder
@@ -132,7 +134,7 @@ class NeuralNetwork(object):
     def preprocess_generator(self, generator):
         for batch in generator:
             _batch = (1.0 / 255) * batch
-            lab_batch = rgb2lab(_batch)
+            lab_batch = rgb_to_lab_tensor(_batch)
             x_batch = lab_batch[:, :, :, 0] / 100.0
             y_batch = lab_batch[:, :, :, 1:] / 128.0
             yield (x_batch[:, :, :, None], y_batch)
