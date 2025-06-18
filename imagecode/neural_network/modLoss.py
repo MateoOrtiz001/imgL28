@@ -1,6 +1,8 @@
 import tensorflow as tf
+from tensorflow.keras.saving import register_keras_serializable
 from preprocess import *
 
+@register_keras_serializable()
 @tf.function
 def combined_loss(y_true, y_pred):
     # y_true = [L, ab_true]

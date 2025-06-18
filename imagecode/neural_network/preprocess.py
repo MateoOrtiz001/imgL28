@@ -1,5 +1,7 @@
+from tensorflow.keras.saving import register_keras_serializable
 import tensorflow as tf
 
+@register_keras_serializable()
 @tf.function
 def lab_to_rgb_tensor(lab):
     """
