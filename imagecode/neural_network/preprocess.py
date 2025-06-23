@@ -2,8 +2,7 @@ from tensorflow.keras.saving import register_keras_serializable
 import tensorflow as tf
 
 @register_keras_serializable()
-@tf.function
-def lab_to_rgb_tensor(lab):
+def lab_to_rgb_tensor(x_L,ab):
     """
     Función generada por DeepSeek.
     Args:
@@ -11,9 +10,9 @@ def lab_to_rgb_tensor(lab):
     Returns:
         rgb: tensor (batch, H, W, 3)
     """
-    L = lab[..., 0] * 100.0
-    a = lab[..., 1] * 128.0
-    b = lab[..., 2] * 128.0
+    L = x_L[..., 0] * 100.0
+    a = ab[..., 0] * 128.0
+    b = ab[..., 1] * 128.0
 
     # Combinar
     lab = tf.stack([L, a, b], axis=-1)
@@ -42,7 +41,7 @@ def lab_to_rgb_tensor(lab):
     rgb = tf.clip_by_value(rgb, 0.0, 1.0)
     return rgb
 
-@tf.function
+@register_keras_serializable()
 def rgb_to_lab_tensor(rgb):
     """
     Función generada por DeepSeek.

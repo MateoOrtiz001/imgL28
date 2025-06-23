@@ -32,7 +32,7 @@ class NeuralNetwork(object):
                 if filename.endswith((".png", ".jpg", ".jpeg")):
                     self.training_set_size += 1
                     
-        self.datagen = ImageDataGenerator(brightness_range=[0.8, 1.2], zoom_range=0.2, rotation_range=20, horizontal_flip=True,validation_split=0.2)
+        self.datagen = ImageDataGenerator(brightness_range=[0.8, 1.2], zoom_range=0.2, rotation_range=20, horizontal_flip=True,validation_split=0.1)
         
         if path_to_model is None:
             self.model = self.neural_network_structure()
@@ -113,8 +113,8 @@ class NeuralNetwork(object):
         return Model(inputs=network_input, outputs=network_output,name="colorizer")
 
     @staticmethod
-    def load_model_from_file(filename):
-        return load_model(filename)
+    def load_model_from_file(filename, compile=False):
+        return load_model(filename,compile=compile)
         
     def image_gen(self, subset='training'):
         generator = self.datagen.flow_from_directory(
@@ -137,12 +137,14 @@ class NeuralNetwork(object):
             lab_batch = rgb_to_lab_tensor(_batch)
             x_batch = lab_batch[:, :, :, 0] / 100.0
             y_batch = lab_batch[:, :, :, 1:] / 128.0
-            yield (x_batch[:, :, :, None], y_batch)
+            yield (x_batch, y_batch,x_batch)
 
-
+    def compile(self,lr = 0.0001):
+        opt = Adamax(learning_rate=lr)
+        self.model.compile(optimizer=opt, loss=CustomCombinedLoss(), metrics=[psnr,ssim])
+        
     def train(self):
-        opt = Adamax(learning_rate=0.0001)
-        patience = 20
+        patience = 12
         tb_callback = keras.callbacks.TensorBoard(
             log_dir='./logs',
             histogram_freq=0,
@@ -157,9 +159,7 @@ class NeuralNetwork(object):
             save_best_only=True
         )
         early_stop = EarlyStopping(monitor='val_loss', patience=patience)
-        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1)
-
-        self.model.compile(optimizer=opt, loss=combined_loss, metrics=[psnr,ssim])
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=int(patience / 4), verbose=1) 
 
         # Crear generadores
         train_generator = self.image_gen(subset='training')
