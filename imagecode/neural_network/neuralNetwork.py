@@ -7,6 +7,7 @@ from tensorflow.keras.optimizers import Adamax
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.initializers import Orthogonal, HeNormal
 from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.mixed_precision import set_global_policy
 from math import ceil
 from modLayers import *
 from modMetrics import *
@@ -49,8 +50,8 @@ class NeuralNetwork(object):
         encoder_output = encoder.get_layer('block_13_expand_relu').output  #8
         # cuello de botella
                                                     
-        b = Conv2D(512, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(encoder_output)
-        b = Conv2D(512, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(b)
+        b = Conv2D(384, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(encoder_output)
+        b = Conv2D(316, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(b)
         b = BatchNormalization()(b)
         b = Dropout(0.1)(b)
         
@@ -109,13 +110,17 @@ class NeuralNetwork(object):
             lab_batch = rgb_to_lab_tensor(_batch)
             x_batch = lab_batch[:, :, :, 0] / 100.0
             y_batch = lab_batch[:, :, :, 1:] / 128.0
-            yield (x_batch, y_batch,x_batch)
+            
+            x_batch = tf.expand_dims(x_batch, axis=-1)
+            y_true = tf.concat([x_batch, y_batch], axis=-1)
+            yield (x_batch, y_true)
 
     def compile(self,lr = 0.0001):
         opt = Adamax(learning_rate=lr)
         self.model.compile(optimizer=opt, loss=CustomCombinedLoss(), metrics=[psnr,ssim])
         
     def train(self,epochs = 100):
+        set_global_policy('mixed_float16')
         patience = 12
         tb_callback = keras.callbacks.TensorBoard(
             log_dir='./logs',
