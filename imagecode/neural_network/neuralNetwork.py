@@ -44,33 +44,6 @@ class NeuralNetwork(object):
 
         #encoder
 
-        e1 = Conv2D(16, (3, 3), activation='relu', padding='same')(network_input)   #128
-        e1 = residualBlock(e1,16)
-        e1 = Conv2D(16, (3, 3), activation='relu', padding='same', kernel_regularizer=l2(0.0005))(e1)
-        
-        e2 = MaxPooling2D((2, 2))(e1)                                               #64
-        e2 = BatchNormalization()(e2)
-        e2 = Conv2D(32, (3, 3), activation='relu', padding='same')(e2)
-        e2 = residualBlockCB(e2, 32)
-        e2 = Conv2D(32, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.0005))(e2)
-        
-        e3 = MaxPooling2D((2, 2))(e2)                                               #32
-        e3 = BatchNormalization()(e3)
-        e3 = Conv2D(64, (3, 3), activation='relu', padding='same')(e3)
-        e3 = residualBlockCB(e3, 64)
-        e3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(e3)
-        
-        e4 = MaxPooling2D((2, 2))(e3)                                               #16
-        e4 = BatchNormalization()(e4)
-        e4 = Conv2D(128, (3, 3), activation='relu', padding='same')(e4)
-        e4 = residualBlockCB(e4,128)
-        e4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(e4)
-        
-        e5 = MaxPooling2D((2,2))(e4)                                                #8
-        e5 = BatchNormalization()(e5)
-        e5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.005))(e5)
-        e5 = residualBlock(e5,256)
-        
         # cuello de botella
         
         b = MaxPooling2D((2, 2))(e5)                                                #4
