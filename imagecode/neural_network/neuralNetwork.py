@@ -45,13 +45,21 @@ class NeuralNetwork(object):
         #encoder
         input_3c = Concatenate()([network_input, network_input, network_input])
         encoder = MobileNetV2(include_top=False,weights="imagenet",input_tensor=input_3c)
-        encoder.trainable = False  
+        encoder.trainable = True           # Habilita la posibilidad de entrenar
+        for layer in encoder.layers:       # Congela todo primero
+            layer.trainable = False
+        for layer in encoder.layers[-6:]:  # Congela las capas iniciales
+            layer.trainable = True
 
         encoder_output = encoder.get_layer('block_13_expand_relu').output  #8
         # cuello de botella
                                                     
-        b = Conv2D(384, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(encoder_output)
-        b = Conv2D(316, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(b)
+        b1 = Conv2D(192, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(encoder_output)
+        b2 = Conv2D(192, (5, 5), activation='relu', padding='same', kernel_initializer=Orthogonal())(encoder_output)
+        b = Concatenate()([b1,b2])
+        b = Conv2D(256, (1,1), activation='relu', padding='same', kernel_initializer=Orthogonal())(b)
+        b = BatchNormalization()(b)
+        b = spatialAttention(b)
         b = BatchNormalization()(b)
         b = Dropout(0.1)(b)
         
@@ -62,6 +70,7 @@ class NeuralNetwork(object):
         d4 = Concatenate()([d4,encoder.get_layer('block_6_expand_relu').output])
         d4 = Conv2D(192, (3,3), activation='relu', padding='same')(d4)
         d4 = spatialAttention(d4)
+        d4 = BatchNormalization()(d4)
         d4 = Conv2D(192, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.005))(d4)
         
         d3 = Conv2DTranspose(144, (3,3), strides=(2,2), padding='same', activation='relu')(d4)              #32                                             #32
@@ -69,6 +78,7 @@ class NeuralNetwork(object):
         d3 = Concatenate()([d3,encoder.get_layer('block_3_expand_relu').output])
         d3 = Conv2D(144, (3, 3), activation='relu', padding='same')(d3)
         d3 = spatialAttention(d3)
+        d3 = BatchNormalization()(d3)
         d3 = Conv2D(144, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(d3)       
 
         d2 = Conv2DTranspose(96, (3,3), strides=(2,2), padding='same', activation='relu')(d3)          #64                                                 #64
@@ -76,11 +86,13 @@ class NeuralNetwork(object):
         d2 = Concatenate()([d2,encoder.get_layer('block_1_expand_relu').output])
         d2 = Conv2D(96, (3, 3), activation='relu', padding='same')(d2)
         d2 = spatialAttention(d2)
+        d2 = BatchNormalization()(d2)
         d2 = Conv2D(96, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.0005))(d2)
         d2 = BatchNormalization()(d2)
 
         d2 = spatialAttention(d2)
         d1 = Conv2DTranspose(16, (3, 3), strides=(2, 2), padding='same', activation='relu')(d2)             #128
+        d1 = BatchNormalization()(d1)
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same')(d1)
 
         return Model(inputs=network_input, outputs=network_output,name="colorizer")
