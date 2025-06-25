@@ -1,12 +1,33 @@
-from tensorflow.keras.layers import Add
-from tensorflow.keras.layers import Conv2D, BatchNormalization
-from tensorflow.keras.layers import Multiply
+from tensorflow.keras.layers import Add, Multiply, Conv2D, BatchNormalization, Concatenate, Layer, Input, MaxPooling2D
 from tensorflow.keras.saving import register_keras_serializable
+import tensorflow as tf
 
-@register_keras_serializable()
-def spatialAttention(x):
-    attention = Conv2D(1, (1, 1), activation='sigmoid')(x)
-    return Multiply()([x, attention])
+class SpatialAttentionBlock(Layer):
+    def __init__(self, **kwargs):
+        super(SpatialAttentionBlock, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.conv = Conv2D(
+            filters=1, 
+            kernel_size=7, 
+            activation='sigmoid', 
+            padding='same',
+            name="spatial_attention_conv"
+        )
+        super(SpatialAttentionBlock, self).build(input_shape)
+
+    def call(self, inputs):
+        avg_pool = tf.reduce_mean(inputs, axis=3, keepdims=True)
+        max_pool = tf.reduce_max(inputs, axis=3, keepdims=True)
+
+        concat = Concatenate(axis=3)([avg_pool, max_pool])
+
+        attention = self.conv(concat)
+        return Multiply()([inputs, attention])
+
+    def get_config(self):
+        config = super().get_config()
+        return config
 
 @register_keras_serializable()
 def residualBlock(x, filters):
