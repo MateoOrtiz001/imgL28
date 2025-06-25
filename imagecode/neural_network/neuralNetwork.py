@@ -1,12 +1,12 @@
-from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, Reshape, concatenate, MaxPooling2D, Dropout, BatchNormalization, Conv2DTranspose
+from tensorflow.keras.layers import Conv2D, UpSampling2D, Input, Reshape, Concatenate, MaxPooling2D, Dropout, BatchNormalization, Conv2DTranspose
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.regularizers import l1, l2, OrthogonalRegularizer, l1_l2
 from tensorflow.keras.preprocessing.image import  ImageDataGenerator
 from tensorflow.keras.utils import img_to_array, load_img
 from tensorflow.keras.optimizers import Adamax
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
-from skimage.color import rgb2lab, lab2rgb, rgb2gray, gray2rgb
 from tensorflow.keras.initializers import Orthogonal, HeNormal
+from tensorflow.keras.applications import MobileNetV2
 from math import ceil
 from modLayers import *
 from modMetrics import *
@@ -19,10 +19,9 @@ import tensorflow as tf
 
 
 class NeuralNetwork(object):
-    def __init__(self, training_path="./dataset", epochs=50, batch_size=16, path_to_model=None, image_size=128):
+    def __init__(self, training_path="./dataset", batch_size=16, path_to_model=None, image_size=128):
         self.training_path = training_path
         self.image_size = image_size
-        self.epochs = epochs
         self.batch_size = batch_size
 
         # Solo calcula el tamaño del training set si es necesario (entrenamiento)
@@ -40,47 +39,47 @@ class NeuralNetwork(object):
             self.model = NeuralNetwork.load_model_from_file(path_to_model)
 
     def neural_network_structure(self):
-        network_input = Input(shape=(None, None, 1,))
+        network_input = Input(shape=(None, None, 1))
 
         #encoder
+        input_3c = Concatenate()([network_input, network_input, network_input])
+        encoder = MobileNetV2(include_top=False,weights="imagenet",input_tensor=input_3c)
+        encoder.trainable = False  
 
+        encoder_output = encoder.get_layer('block_13_expand_relu').output  #8
         # cuello de botella
-        
-        b = MaxPooling2D((2, 2))(e5)                                                #4
+                                                    
+        b = Conv2D(512, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(encoder_output)
+        b = Conv2D(512, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(b)
         b = BatchNormalization()(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal())(b)
-        b = Conv2D(256, (2, 2), activation='relu', padding='same', kernel_regularizer=l1_l2(l1=0.001, l2=0.005), kernel_initializer=HeNormal())(b)
-        b = Dropout(0.3)(b)
+        b = Dropout(0.1)(b)
         
         # decoder
         
-        d5 = Conv2DTranspose(256, (3,3), strides=(2,2), padding='same', activation='relu')(b)  #8
-        d5 = BatchNormalization()(d5)
-        d5 = concatenate([d5,e5])
-        d5 = Conv2D(256, (3,3), activation='relu', padding='same')(d5)
-        d5 = spatialAttention(d5)
-        d5 = Conv2D(256, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.005))(d5)
-        
-        d4 = UpSampling2D((2, 2))(d5)                                                            #16
+        d4 = Conv2DTranspose(192, (3,3), strides=(2,2), padding='same', activation='relu')(b)  #16
         d4 = BatchNormalization()(d4)
-        d4 = concatenate([d4,e4])
-        d4 = Conv2D(128, (3, 3), activation='relu', padding='same')(d4)
+        d4 = Concatenate()([d4,encoder.get_layer('block_6_expand_relu').output])
+        d4 = Conv2D(192, (3,3), activation='relu', padding='same')(d4)
         d4 = spatialAttention(d4)
-        d4 = Conv2D(128, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(d4)
-
-        d3 = UpSampling2D((2, 2))(d4)                                                           #32
-        d3 = BatchNormalization()(d3)
-        d3 = concatenate([d3,e3])
-        d3 = Conv2D(64, (3, 3), activation='relu', padding='same')(d3)
-        d3 = spatialAttention(d3)
-        d3 = Conv2D(64, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.0005))(d3)
+        d4 = Conv2D(192, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.005))(d4)
         
-        d2 = Conv2DTranspose(16, (3, 3), strides=(2,2), padding='same', activation='relu')(d3)   #64
+        d3 = Conv2DTranspose(144, (3,3), strides=(2,2), padding='same', activation='relu')(d4)              #32                                             #32
+        d3 = BatchNormalization()(d3)
+        d3 = Concatenate()([d3,encoder.get_layer('block_3_expand_relu').output])
+        d3 = Conv2D(144, (3, 3), activation='relu', padding='same')(d3)
+        d3 = spatialAttention(d3)
+        d3 = Conv2D(144, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.001))(d3)       
+
+        d2 = Conv2DTranspose(96, (3,3), strides=(2,2), padding='same', activation='relu')(d3)          #64                                                 #64
         d2 = BatchNormalization()(d2)
-        d2 = concatenate([d2,e2])
-        d2 = Conv2D(32, (3,3), padding='same', activation='relu', kernel_regularizer=l2(0.0005))(d2)
+        d2 = Concatenate()([d2,encoder.get_layer('block_1_expand_relu').output])
+        d2 = Conv2D(96, (3, 3), activation='relu', padding='same')(d2)
         d2 = spatialAttention(d2)
-        d1 = Conv2DTranspose(8, (3, 3), strides=(2, 2), padding='same', activation='relu')(d2)  #128
+        d2 = Conv2D(96, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.0005))(d2)
+        d2 = BatchNormalization()(d2)
+
+        d2 = spatialAttention(d2)
+        d1 = Conv2DTranspose(16, (3, 3), strides=(2, 2), padding='same', activation='relu')(d2)             #128
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same')(d1)
 
         return Model(inputs=network_input, outputs=network_output,name="colorizer")
@@ -116,7 +115,7 @@ class NeuralNetwork(object):
         opt = Adamax(learning_rate=lr)
         self.model.compile(optimizer=opt, loss=CustomCombinedLoss(), metrics=[psnr,ssim])
         
-    def train(self):
+    def train(self,epochs = 100):
         patience = 12
         tb_callback = keras.callbacks.TensorBoard(
             log_dir='./logs',
@@ -151,14 +150,14 @@ class NeuralNetwork(object):
             steps_per_epoch=train_steps,
             validation_data=val_generator_preprocessed,
             validation_steps=val_steps,
-            epochs=self.epochs,
+            epochs=epochs,
             callbacks=[tb_callback, model_checkpoint, early_stop, reduce_lr]
         )
 
-    def save_model(self):
-        self.model.save_weights('weights_{}e_pic.weights.h5'.format(self.epochs))
-        self.model.save('model_{}e_pic_m.keras'.format(self.epochs))
+    def save_model(self,epochs=100):
+        self.model.save_weights('weights_{}e_pic.weights.h5'.format(epochs))
+        self.model.save('model_{}e_pic_m.keras'.format(epochs))
 
-    def run(self):
-        self.train()
-        self.save_model()
+    def run(self,epochs=100):
+        self.train(epochs)
+        self.save_model(epochs)
