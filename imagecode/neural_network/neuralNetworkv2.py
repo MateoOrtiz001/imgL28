@@ -124,7 +124,7 @@ class NeuralNetwork(object):
         
         # X es el canal L, Y es la imagen completa LAB
         x = l_channel
-        y = tf.concat([l_channel, ab_channels], axis=-1)
+        y = [ab_channels, ab_channels]
         
         return x, y
 
@@ -204,7 +204,9 @@ class NeuralNetwork(object):
         b = Conv2D(256, (1,1), activation='relu', padding='same', kernel_initializer=Orthogonal(np.sqrt(2)),
                     kernel_regularizer=OrthogonalConvRegularizer(1e-4),name='block_b_reduce')(b)
         b = BatchNormalization()(b)
-        b = SpatialAttentionBlock()(b)
+        b_attention = FullyConvGlobalAttention(reduction_ratio=16)(b)
+        b_guided, color_guidance  = LightweightSemanticGuidance(num_semantic_channels=32)(b_attention)
+        b = Add()([b,b_guided])
         b = Dropout(0.1)(b)
         
         # decoder
@@ -251,7 +253,7 @@ class NeuralNetwork(object):
                     kernel_regularizer=OrthogonalConvRegularizer(1e-5),name='d_block_1_leaky')(d1)
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same',name='output')(d1)
 
-        return Model(inputs=network_input, outputs=network_output,name="colorizer")
+        return Model(inputs=network_input, outputs=[network_output,color_guidance],name="colorizer")
 
     @staticmethod
     def load_model_from_file(filename, compile=False):
