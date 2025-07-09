@@ -1,6 +1,9 @@
-from tensorflow.keras.layers import Add, Multiply, Conv2D, BatchNormalization, Concatenate, Layer, Input, MaxPooling2D
+from tensorflow.keras.layers import Add, Multiply, Conv2D, BatchNormalization, Concatenate, Layer, Input, MaxPooling2D, DepthwiseConv2D
 from tensorflow.keras.saving import register_keras_serializable
+from tensorflow.keras.initializers import Orthogonal
 import tensorflow as tf
+import numpy as np
+from modRegularizer import OrthogonalConvRegularizer
 
 @register_keras_serializable()
 class SpatialAttentionBlock(Layer):
@@ -88,9 +91,16 @@ class LightweightSemanticGuidance(Layer):
     """
     Guía semántica ligera usando solo convoluciones
     """
-    def __init__(self, num_semantic_channels=32, **kwargs):
+    def __init__(self, num_semantic_channels=32, 
+                 guidance_weight=0.1, 
+                 diversity_weight=0.05,
+                 smoothness_weight=0.02,
+                 **kwargs):
         super().__init__(**kwargs)
         self.num_semantic_channels = num_semantic_channels
+        self.guidance_weight = guidance_weight
+        self.diversity_weight = diversity_weight
+        self.smoothness_weight = smoothness_weight
         
     def build(self, input_shape):
         self.channels = input_shape[-1]
@@ -107,7 +117,7 @@ class LightweightSemanticGuidance(Layer):
         
         super().build(input_shape)
     
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         # 1. Extraer características semánticas
         semantic_features = self.semantic_conv1(inputs)
         semantic_features = self.semantic_conv2(semantic_features)
@@ -122,7 +132,28 @@ class LightweightSemanticGuidance(Layer):
         # Combinar con features originales
         combined = Concatenate()([inputs, guidance_expanded])
         output = self.feature_fusion(combined)
-        
+               # Agregar pérdidas auxiliares durante entrenamiento
+        if training:
+            # Pérdida de diversidad
+            guidance_mean = tf.reduce_mean(color_guidance, axis=[1, 2], keepdims=True)
+            guidance_variance = tf.reduce_mean(
+                tf.square(color_guidance - guidance_mean), axis=[1, 2, 3]
+            )
+            diversity_loss = self.diversity_weight * tf.reduce_mean(
+                tf.maximum(0.0, 0.1 - guidance_variance)
+            )
+            
+            # Pérdida de suavidad
+            grad_h = color_guidance[:, :, 1:, :] - color_guidance[:, :, :-1, :]
+            grad_v = color_guidance[:, 1:, :, :] - color_guidance[:, :-1, :, :]
+            smoothness_loss = self.smoothness_weight * (
+                tf.reduce_mean(tf.square(grad_h)) + tf.reduce_mean(tf.square(grad_v))
+            )
+            
+            # Agregar pérdidas al modelo
+            self.add_loss(diversity_loss)
+            self.add_loss(smoothness_loss)
+            
         return output, color_guidance
 
 @register_keras_serializable()
@@ -146,3 +177,26 @@ def residualBlockCB(x, filters):
     x = BatchNormalization()(x)
     x = Add()([x,shortcut])
     return x
+
+@register_keras_serializable()
+def mobileBlock(x, filters, regularizer=None):
+    shortcut = x
+    x = Conv2D(filters, (1,1), padding='same', activation='relu', kernel_initializer=Orthogonal(np.sqrt(2)),
+                    kernel_regularizer=regularizer)(x)
+    x = BatchNormalization()(x)
+    x = DepthwiseConv2D((3,3), activation='relu', padding='same', depthwise_initializer=Orthogonal(np.sqrt(2)),
+                    depthwise_regularizer=regularizer )(x)
+    x = BatchNormalization()(x)
+    x = Conv2D(filters, (1,1), padding='same', activation='relu', kernel_initializer=Orthogonal(np.sqrt(2)),
+                    kernel_regularizer=regularizer)(x)
+    x = BatchNormalization()(x)
+    x = Add()([x,shortcut])
+    return x
+
+@register_keras_serializable()
+class IdentityLayer(Layer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def call(self, inputs):
+        return inputs

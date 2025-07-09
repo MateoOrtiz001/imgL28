@@ -14,8 +14,9 @@ class CustomCombinedLoss(Loss):
         self.mobilenet.trainable = False
         
     def call(self, y_true, y_pred):
-        # y_pred ahora es una lista: [main_output, guidance_output]
-        ab_pred, guidance_pred = y_pred[0], y_pred[1]
+
+        ab_pred = y_pred
+        
         x_L = y_true[..., :1]
         ab_true = y_true[..., 1:]
         
@@ -31,11 +32,7 @@ class CustomCombinedLoss(Loss):
         
         main_loss = 0.6 * mae + 0.3 * ssim_loss + 0.1 * perceptual_loss
         
-        # 2. Pérdida para color_guidance (nueva)
-        # Usamos MAE sobre los canales ab predichos vs guidance
-        guidance_loss = tf.reduce_mean(tf.abs(ab_true - guidance_pred))
-        
-        return main_loss + self.guidance_weight * guidance_loss
+        return main_loss
     
     def to_01(self, x):
-        return tf.clip_by_value((x + 1.0) / 2.0, 0.0, 1.0)
+        return tf.clip_by_value((x + 1.0) / 2.0, 0.0, 1.0)  
