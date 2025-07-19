@@ -30,6 +30,10 @@ class CustomCombinedLoss(Loss):
         pred_features = self.mobilenet(y_pred_rgb)
         perceptual_loss = tf.reduce_mean(tf.square(true_features - pred_features))
         
+        mae = tf.cast(mae, tf.float32)
+        ssim_loss = tf.cast(ssim_loss, tf.float32)
+        perceptual_loss = tf.cast(perceptual_loss, tf.float32)
+        
         main_loss = 0.6 * mae + 0.3 * ssim_loss + 0.1 * perceptual_loss
         
         return main_loss
