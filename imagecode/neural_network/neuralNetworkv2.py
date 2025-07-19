@@ -255,6 +255,7 @@ class NeuralNetwork(object):
         d1 = Conv2D(32,(3,3), strides=(1,1), padding='same', activation='relu', kernel_initializer=Orthogonal(np.sqrt(2)),
                     kernel_regularizer=OrthogonalConvRegularizer(1e-5),name='d_block_1_relu')(d1)
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same',name='output')(d1)
+        network_output = tf.keras.layers.Activation('linear', dtype='float32')(network_output)
 
         return Model(inputs=network_input, outputs=network_output,name="colorizer")
 
