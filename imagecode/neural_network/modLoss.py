@@ -14,7 +14,6 @@ class CustomCombinedLoss(Loss):
         self.mobilenet.trainable = False
         
     def call(self, y_true, y_pred):
-
         ab_pred = y_pred
         
         x_L = y_true[..., :1]
@@ -28,7 +27,7 @@ class CustomCombinedLoss(Loss):
         y_pred_rgb = lab_to_rgb_tensor(x_L, ab_pred)
         true_features = self.mobilenet(y_true_rgb)
         pred_features = self.mobilenet(y_pred_rgb)
-        perceptual_loss = tf.reduce_mean(tf.square(true_features - pred_features))
+        perceptual_loss = tf.cast(tf.reduce_mean(tf.square(true_features - pred_features)), tf.float32)
         
         main_loss = 0.6 * mae + 0.3 * ssim_loss + 0.1 * perceptual_loss
         
