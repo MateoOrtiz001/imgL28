@@ -197,7 +197,7 @@ class NeuralNetwork(object):
                                                     
         b1 = Conv2D(192, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal(np.sqrt(2)),
                     kernel_regularizer=OrthogonalConvRegularizer(1e-5),name='block_b_local')(encoder_output)
-        b2 = Conv2D(192, (5, 5), activation='relu', padding='same', kernel_initializer=Orthogonal(np.sqrt(2)),
+        b2 = Conv2D(192, (3, 3), activation='relu', padding='same', kernel_initializer=Orthogonal(np.sqrt(2)),
                     kernel_regularizer=OrthogonalConvRegularizer(1e-5),name='block_b_global')(encoder_output)
         b3 = Conv2D(192, (1, 1), activation='relu', padding='same', kernel_initializer=Orthogonal(np.sqrt(2)),
                     kernel_regularizer=OrthogonalConvRegularizer(1e-5),name='block_b_pool_reduce')(encoder_output)
@@ -207,7 +207,7 @@ class NeuralNetwork(object):
         b = Conv2D(256, (1,1), activation='relu', padding='same', kernel_initializer=Orthogonal(np.sqrt(2)),
                     kernel_regularizer=OrthogonalConvRegularizer(1e-4),name='block_b_reduce')(b)
         b = BatchNormalization()(b)
-        b = residualBlockCB(b,256)
+        b = residualBlock(b,256)
         b_attention = FullyConvGlobalAttention(reduction_ratio=16)(b)
         # b_guided, color_guidance  = LightweightSemanticGuidance(num_semantic_channels=16,guidance_weight=0.125, diversity_weight=0.05, smoothness_weight=0.04)(b_attention)
         b = Add()([b_attention,b])
@@ -216,8 +216,8 @@ class NeuralNetwork(object):
         # decoder
         
         d4 = UpSampling2D(size=(2, 2),name='d_block_4_upscaling')(b)
-        d4 = Conv2D(192, (3,3), padding='same', activation='relu',kernel_initializer=Orthogonal(),
-                    kernel_regularizer=OrthogonalConvRegularizer(1e-4),name='d_block4_orth')(d4) #16
+        d4 = Conv2D(192, (3,3), padding='same', activation='relu',kernel_initializer=Orthogonal(np.sqrt(2)),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-6),name='d_block4_orth')(d4) #16
         d4 = BatchNormalization(name='d_block_4_normalize')(d4)
         d4 = Concatenate(name='d_block_4_residual')([d4,encoder.get_layer('block_6_expand_relu').output])
         d4 = Conv2D(192,(3,3), activation='relu', padding='same',name='d_block_4_depthwise')(d4)
@@ -228,7 +228,7 @@ class NeuralNetwork(object):
         d4 = BatchNormalization()(d4)
         
         d3 = Conv2DTranspose(144, (3,3), strides=(2,2), padding='same',kernel_initializer=Orthogonal(np.sqrt(2)),
-                    kernel_regularizer=OrthogonalConvRegularizer(1e-4), activation='relu', name='d_block_3_upscaling')(d4)              #32                                             #32
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-6), activation='relu', name='d_block_3_upscaling')(d4)              #32                                             #32
         d3 = BatchNormalization(name='d_block_3_normalize')(d3)
         d3 = Concatenate(name='d_block_3residual')([d3,encoder.get_layer('block_3_expand_relu').output])
         d3 = Conv2D(144,(3,3), activation='relu', padding='same',name='d_block_3_depthwise')(d3)
@@ -239,7 +239,7 @@ class NeuralNetwork(object):
         d3 = BatchNormalization()(d3)
 
         d2 = Conv2DTranspose(96, (3,3), strides=(2,2), padding='same',kernel_initializer=Orthogonal(np.sqrt(2)),
-                    kernel_regularizer=OrthogonalConvRegularizer(1e-4), activation='relu', name='d_block_2_upscaling')(d3)          #64                                                 #64
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-6), activation='relu', name='d_block_2_upscaling')(d3)          #64                                                 #64
         d2 = BatchNormalization(name='d_block_2_normalize')(d2)
         d2 = Concatenate(name='d_block_2_residual')([d2,encoder.get_layer('block_1_expand_relu').output])
         d2 = Conv2D(96,(3,3), activation='relu', padding='same',name='d_block_2_depthwise_1')(d2)
@@ -267,7 +267,6 @@ class NeuralNetwork(object):
         self.model.compile(optimizer=opt, loss=CustomCombinedLoss(), metrics=[psnr, ssim])
         
     def train(self, epochs=100):
-        set_global_policy('mixed_float16')
         patience = 12
         
         tb_callback = keras.callbacks.TensorBoard(
