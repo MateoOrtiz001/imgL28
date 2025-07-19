@@ -26,6 +26,11 @@ class CustomCombinedLoss(Loss):
         
         x_L = y_true[..., :1]
         ab_true = y_true[..., 1:]
+        print("x_L: ",x_L.dtype)
+        print("\n")
+        print("ab_true: ",ab_true.dtype)
+        print("\n")
+        print("y_pred: ",ab_pred.dtype)
         
         # 1. Pérdida principal (igual que antes) - asegurar que todas sean float32
         mae = tf.cast(tf.reduce_mean(tf.abs(ab_true - ab_pred)), tf.float32)
