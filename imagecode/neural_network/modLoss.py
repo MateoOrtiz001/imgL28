@@ -14,7 +14,9 @@ class CustomCombinedLoss(Loss):
         self.mobilenet.trainable = False
         
     def call(self, y_true, y_pred):
-
+        y_true = tf.cast(y_true, tf.float32)
+        y_pred = tf.cast(y_pred, tf.float32)
+        
         ab_pred = y_pred
         
         x_L = y_true[..., :1]
@@ -34,9 +36,10 @@ class CustomCombinedLoss(Loss):
         ssim_loss = tf.cast(ssim_loss, tf.float32)
         perceptual_loss = tf.cast(perceptual_loss, tf.float32)
         
-        main_loss = 0.6 * mae + 0.3 * ssim_loss + 0.1 * perceptual_loss
+        main_loss = tf.cast(0.6, tf.float32) * mae + tf.cast(0.3, tf.float32) * ssim_loss + tf.cast(0.1, tf.float32) * perceptual_loss
         
         return main_loss
     
     def to_01(self, x):
+        x = tf.cast(x, tf.float32)
         return tf.clip_by_value((x + 1.0) / 2.0, 0.0, 1.0)  
