@@ -12,6 +12,7 @@ from math import ceil
 from modLayers import *
 from modMetrics import *
 from modLoss import *
+from modRegularizer import *
 from preprocess import *
 import keras
 import numpy as np
@@ -49,16 +50,19 @@ class NeuralNetwork(object):
         encoder.trainable = True           # Habilita la posibilidad de entrenar
         for layer in encoder.layers:       # Congela todo primero
             layer.trainable = False
-        for layer in encoder.layers[-6:]:  # Congela las capas iniciales
+        for layer in encoder.layers[103:118]:   # Descongelamos los bloques 13 y 12, hasta la capa block_13_expand_relu
             layer.trainable = True
 
         encoder_output = encoder.get_layer('block_13_expand_relu').output  #8
         # cuello de botella
                                                     
-        b1 = Conv2D(192, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal(),name='block_b_local')(encoder_output)
-        b2 = Conv2D(192, (5, 5), activation='relu', padding='same', kernel_initializer=Orthogonal(),name='block_b_global')(encoder_output)
+        b1 = Conv2D(192, (2, 2), activation='relu', padding='same', kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-5),name='block_b_local')(encoder_output)
+        b2 = Conv2D(192, (5, 5), activation='relu', padding='same', kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-5),name='block_b_global')(encoder_output)
         b = Concatenate(name='block_b')([b1,b2])
-        b = Conv2D(256, (1,1), activation='relu', padding='same', kernel_initializer=Orthogonal(),name='block_b_reduce')(b)
+        b = Conv2D(256, (1,1), activation='relu', padding='same', kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-4),name='block_b_reduce')(b)
         b = BatchNormalization()(b)
         b = SpatialAttentionBlock()(b)
         b = Dropout(0.1)(b)
@@ -66,34 +70,42 @@ class NeuralNetwork(object):
         # decoder
         
         d4 = UpSampling2D(size=(2, 2),name='d_block_4_upscaling')(b)
-        d4 = Conv2D(192, (3,3), padding='same', activation='relu',kernel_initializer=Orthogonal(),name='d_block4_orth')(d4) #16
+        d4 = Conv2D(192, (3,3), padding='same', activation='relu',kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-4),name='d_block4_orth')(d4) #16
         d4 = BatchNormalization(name='d_block_4_normalize')(d4)
         d4 = Concatenate(name='d_block_4_residual')([d4,encoder.get_layer('block_6_expand_relu').output])
-        d4 = Conv2D(192, (3,3), activation='relu', padding='same',kernel_initializer=Orthogonal(),name='d_block_4_conv_1')(d4)
+        d4 = Conv2D(192, (3,3), activation='relu', padding='same',kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-4),name='d_block_4_conv_1')(d4)
         d4 = SpatialAttentionBlock()(d4)
-        d4 = Conv2D(192, (3,3), activation='relu', padding='same',kernel_initializer=Orthogonal(),kernel_regularizer=l2(0.0005),name='d_block_4_conv_2')(d4)
+        d4 = Conv2D(192, (3,3), activation='relu', padding='same',kernel_initializer=Orthogonal()
+                    ,kernel_regularizer=l2(1e-4),name='d_block_4_conv_2')(d4)
         d4 = BatchNormalization()(d4)
         
-        d3 = Conv2DTranspose(144, (3,3), strides=(2,2), padding='same',kernel_initializer=Orthogonal(), activation='relu', name='d_block_3_upscaling')(d4)              #32                                             #32
+        d3 = Conv2DTranspose(144, (3,3), strides=(2,2), padding='same',kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-4), activation='relu', name='d_block_3_upscaling')(d4)              #32                                             #32
         d3 = BatchNormalization(name='d_block_3_normalize')(d3)
         d3 = Concatenate(name='d_block_3residual')([d3,encoder.get_layer('block_3_expand_relu').output])
-        d3 = Conv2D(144, (3, 3), activation='relu', padding='same',kernel_initializer=Orthogonal(),name='d_block_3_conv_1')(d3)
+        d3 = Conv2D(144, (3, 3), activation='relu', padding='same',kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-4),name='d_block_3_conv_1')(d3)
         d3 = SpatialAttentionBlock()(d3)
-        d3 = Conv2D(144, (3,3), activation='relu', padding='same',kernel_initializer=Orthogonal(), kernel_regularizer=l2(0.0001),name='d_block_3_conv_2')(d3)       
+        d3 = Conv2D(144, (3,3), activation='relu', padding='same',kernel_initializer=Orthogonal()
+                    , kernel_regularizer=l2(1e-4),name='d_block_3_conv_2')(d3)       
         d3 = BatchNormalization()(d3)
 
-        d2 = Conv2DTranspose(96, (3,3), strides=(2,2), padding='same',kernel_initializer=Orthogonal(), activation='relu', name='d_block_2_upscaling')(d3)          #64                                                 #64
+        d2 = Conv2DTranspose(96, (3,3), strides=(2,2), padding='same',kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-4), activation='relu', name='d_block_2_upscaling')(d3)          #64                                                 #64
         d2 = BatchNormalization(name='d_block_2_normalize')(d2)
         d2 = Concatenate(name='d_block_2_residual')([d2,encoder.get_layer('block_1_expand_relu').output])
-        d2 = Conv2D(96, (3, 3), activation='relu', padding='same',kernel_initializer=Orthogonal(),name='d_block_2_conv_1')(d2)
+        d2 = Conv2D(96, (3, 3), activation='relu', padding='same',kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-4),name='d_block_2_conv_1')(d2)
         d2 = SpatialAttentionBlock()(d2)
-        d2 = Conv2D(96, (3,3), activation='relu', padding='same', kernel_regularizer=l2(0.00005),kernel_initializer=Orthogonal(),
+        d2 = Conv2D(96, (3,3), activation='relu', padding='same', kernel_regularizer=l2(5e-5),kernel_initializer=Orthogonal(),
                     name='d_block_2_conv_2')(d2)
         d2 = BatchNormalization()(d2)
 
         d2 = SpatialAttentionBlock()(d2)
-        d1 = Conv2DTranspose(32, (3, 3), strides=(2, 2), padding='same', activation='relu', kernel_initializer=Orthogonal()
-                             ,name='d_block_1_upscaling')(d2)             #128
+        d1 = Conv2DTranspose(32, (3, 3), strides=(2, 2), padding='same', activation='relu', kernel_initializer=Orthogonal(),
+                    kernel_regularizer=OrthogonalConvRegularizer(1e-5),name='d_block_1_upscaling')(d2)             #128
         network_output = Conv2D(2, (3, 3), activation='tanh', padding='same',name='output')(d1)
 
         return Model(inputs=network_input, outputs=network_output,name="colorizer")
